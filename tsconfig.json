@@ -1,0 +1,15 @@
+{
+    "compilerOptions": {
+        "downlevelIteration": true,
+        "outDir": "build",
+        "esModuleInterop": true,
+        "noEmitOnError": true,
+        "declaration": true
+    },
+    "files": [
+        "src/index.ts",
+        "src/signer.ts",
+        "src/client.ts",
+        "src/provider.ts"
+    ]
+}
