@@ -1,5 +1,5 @@
 import * as zksync from 'zksync';
-import { pubKeyHash } from 'zksync-crypto';
+import { pubKeyHash, private_key_to_pubkey, privateKeyFromSeed } from 'zksync-crypto';
 import { ethers, utils } from 'ethers';
 import { MusigSigner } from './signer';
 import { SwapData, Network } from './types';
@@ -50,7 +50,21 @@ export class SwapClient {
         const ethWallet = new ethers.Wallet(privateKey).connect(ethProvider);
 
         const syncWallet = await zksync.Wallet.fromEthSigner(ethWallet, syncProvider);
-        return new SwapClient(ethWallet.privateKey, ethWallet.publicKey, syncWallet);
+        let chainID = 1;
+        if (ethWallet.provider) {
+            const network = await ethWallet.provider.getNetwork();
+            chainID = network.chainId;
+        }
+        let message = "Access zkSync account.\n\nOnly sign this message for a trusted client!";
+        if (chainID !== 1) {
+            message += `\nChain ID: ${chainID}.`;
+        }
+        const signedBytes = zksync.utils.getSignedBytesFromMessage(message, false);
+        const signature = await zksync.utils.signMessagePersonalAPI(ethWallet, signedBytes);
+        const seed = ethers.utils.arrayify(signature);
+        const privkey = privateKeyFromSeed(seed);
+        const pubkey = private_key_to_pubkey(privkey);
+        return new SwapClient(utils.hexlify(privkey), utils.hexlify(pubkey), syncWallet);
     }
 
     getPubkey() {
@@ -94,6 +108,7 @@ export class SwapClient {
     }) {
         // TODO check that transactions are correct before we sign them
         this.signer.receiveCommitments(transpose([data.commitments, this.commitments]));
+        this.signatures = [];
         for (let i = 0; i < 5; i++) {
             const bytes =
                 i == 0

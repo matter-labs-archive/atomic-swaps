@@ -1,5 +1,5 @@
 import * as zksync from 'zksync';
-import { pubKeyHash } from 'zksync-crypto';
+import { pubKeyHash, private_key_to_pubkey, privateKeyFromSeed } from 'zksync-crypto';
 import { ethers, utils } from 'ethers';
 import { MusigSigner } from './signer';
 import { SwapData, SchnorrData, Network } from './types';
@@ -7,10 +7,10 @@ import { transpose } from './utils';
 
 export class SwapProvider {
     private signer: MusigSigner;
-    private transactions: any[];
+    private transactions: any[] = [];
     private signatures: Uint8Array[];
     private swapData: SwapData;
-    private schnorrData: SchnorrData;
+    private schnorrData: SchnorrData = {};
     private pubKeyHash: Uint8Array;
     private swapAddress: string;
     private clientAddress: string;
@@ -26,7 +26,21 @@ export class SwapProvider {
         const ethWallet = new ethers.Wallet(privateKey).connect(ethProvider);
 
         const syncWallet = await zksync.Wallet.fromEthSigner(ethWallet, syncProvider);
-        return new SwapProvider(ethWallet.privateKey, ethWallet.publicKey, syncWallet);
+        let chainID = 1;
+        if (ethWallet.provider) {
+            const network = await ethWallet.provider.getNetwork();
+            chainID = network.chainId;
+        }
+        let message = "Access zkSync account.\n\nOnly sign this message for a trusted client!";
+        if (chainID !== 1) {
+            message += `\nChain ID: ${chainID}.`;
+        }
+        const signedBytes = zksync.utils.getSignedBytesFromMessage(message, false);
+        const signature = await zksync.utils.signMessagePersonalAPI(ethWallet, signedBytes);
+        const seed = ethers.utils.arrayify(signature);
+        const privkey = privateKeyFromSeed(seed);
+        const pubkey = private_key_to_pubkey(privkey);
+        return new SwapProvider(utils.hexlify(privkey), utils.hexlify(pubkey), syncWallet);
     }
 
     getAddress() {
@@ -37,14 +51,15 @@ export class SwapProvider {
         return this.publicKey;
     }
 
-    async createSwap(data: SwapData, publicKey: string, checkBargain?: any) {
+    async createSwap(data: SwapData, publicKey: string, clientAddress: string, checkBargain?: any) {
         if (checkBargain && !checkBargain(data.sell, data.buy)) {
             throw new Error('Swap is not profitable, alter token amounts');
         }
         this.signer = new MusigSigner([this.publicKey, publicKey], 0, 5);
         this.schnorrData.precommitments = this.signer.computePrecommitments();
         this.swapData = data;
-        this.clientAddress = ethers.utils.computeAddress(publicKey);
+        // this.clientAddress = ethers.utils.computeAddress(publicKey);
+        this.clientAddress = clientAddress;
         this.pubKeyHash = pubKeyHash(this.signer.computePubkey());
         this.swapAddress = ethers.utils.getCreate2Address(
             this.clientAddress,
@@ -57,7 +72,7 @@ export class SwapProvider {
         };
     }
 
-    async getTransactions(data: SchnorrData, withdraw: 'L1' | 'L2' = 'L2') {
+    async getTransactions(data: SchnorrData, timeout: number = 120, withdraw: 'L1' | 'L2' = 'L2') {
         this.schnorrData.commitments = this.signer.receivePrecommitments(
             transpose([this.schnorrData.precommitments, data.precommitments])
         );
@@ -81,77 +96,96 @@ export class SwapProvider {
             this.syncWallet.address(),
             this.swapData.sell.token
         );
-        const resolveTokenId = this.syncWallet.provider.tokenSet.resolveTokenId;
+        const tokenSet = this.syncWallet.provider.tokenSet;
+        const now = Math.floor(Date.now() / 1000);
+        const feeTokenId = tokenSet.resolveTokenId(this.swapData.sell.token);
         this.transactions = [];
         this.transactions.push({
+            type: 'ChangePubKey',
             accountId: swapAccount.id,
             account: swapAccount.address,
-            newPkHash: this.pubKeyHash,
+            newPkHash: 'sync:'+utils.hexlify(this.pubKeyHash).slice(2),
             nonce: 0,
-            feeTokenId: resolveTokenId(this.swapData.sell.token),
+            feeTokenId,
             fee: cpkFee,
-            changePubkeyType: {
-                type: 'Create2Contract',
+            validFrom: now,
+            validUntil: zksync.utils.MAX_TIMESTAMP,
+            ethAuthData: {
+                type: 'CREATE2',
                 creatorAddress: this.clientAddress,
                 saltArg: this.swapData.create2.salt,
                 codeHash: this.swapData.create2.hash
             }
         });
-        // TODO: add timeouts
         this.transactions.push({
             type: 'Transfer',
-            tokenId: resolveTokenId(this.swapData.buy.token),
-            accoundId: swapAccount.id,
+            tokenId: tokenSet.resolveTokenId(this.swapData.buy.token),
+            accountId: swapAccount.id,
             from: swapAccount.address,
             to: this.clientAddress,
             amount: this.swapData.buy.amount,
             fee: transferFee,
-            nonce: 1
+            feeTokenId,
+            nonce: 1,
+            validFrom: now,
+            validUntil: now + timeout
         });
 
         if (withdraw == 'L1') {
             this.transactions.push({
                 type: 'Withdraw',
-                tokenId: resolveTokenId(this.swapData.sell.token),
+                tokenId: tokenSet.resolveTokenId(this.swapData.sell.token),
                 accoundId: swapAccount.id,
                 from: swapAccount.address,
                 ethAddress: this.syncWallet.address(),
                 amount: this.swapData.sell.amount,
                 fee: withdrawFee,
-                nonce: 2
+                feeTokenId,
+                nonce: 2,
+                validFrom: now,
+                validUntil: zksync.utils.MAX_TIMESTAMP
             });
         } else {
             this.transactions.push({
                 type: 'Transfer',
-                tokenId: resolveTokenId(this.swapData.sell.token),
-                accoundId: swapAccount.id,
+                tokenId: tokenSet.resolveTokenId(this.swapData.sell.token),
+                accountId: swapAccount.id,
                 from: swapAccount.address,
                 to: this.syncWallet.address(),
                 amount: this.swapData.sell.amount,
                 fee: transferFee,
-                nonce: 2
+                feeTokenId,
+                nonce: 2,
+                validFrom: now,
+                validUntil: zksync.utils.MAX_TIMESTAMP
             });
         }
 
         this.transactions.push({
             type: 'Transfer',
-            tokenId: resolveTokenId(this.swapData.sell.token),
-            accoundId: swapAccount.id,
+            tokenId: tokenSet.resolveTokenId(this.swapData.sell.token),
+            accountId: swapAccount.id,
             from: swapAccount.address,
             to: this.clientAddress,
             amount: this.swapData.sell.amount,
             fee: transferFee,
-            nonce: 3
+            feeTokenId,
+            nonce: 1,
+            validFrom: now + timeout,
+            validUntil: zksync.utils.MAX_TIMESTAMP
         });
         this.transactions.push({
             type: 'Transfer',
-            tokenId: resolveTokenId(this.swapData.buy.token),
-            accoundId: swapAccount.id,
+            tokenId: tokenSet.resolveTokenId(this.swapData.buy.token),
+            accountId: swapAccount.id,
             from: swapAccount.address,
             to: this.syncWallet.address(),
             amount: 0,
             fee: transferFee,
-            nonce: 4
+            feeTokenId,
+            nonce: 2,
+            validFrom: now + timeout,
+            validUntil: zksync.utils.MAX_TIMESTAMP
         });
 
         const privateKey = utils.arrayify(this.privateKey);
@@ -161,6 +195,7 @@ export class SwapProvider {
             const bytes =
                 i == 0
                     ? this.syncWallet.signer.changePubKeySignBytes(this.transactions[i])
+                    // TODO: or withdrawSignBytes
                     : this.syncWallet.signer.transferSignBytes(this.transactions[i]);
             this.signatures.push(this.signer.sign(privateKey, bytes, i));
         }
@@ -172,20 +207,40 @@ export class SwapProvider {
     }
 
     async finalize(signatureShares: Uint8Array[]) {
-        const signatures = signatureShares.map((share, i) =>
+        const signaturesPacked = signatureShares.map((share, i) =>
             this.signer.receiveSignatureShares([this.signatures[i], share], i)
         );
-        this.transactions.forEach((tx, i) => (tx.signature = signatures[i]));
+        const signatures = signaturesPacked.map(sig => Object.fromEntries([
+            ['pubKey', utils.hexlify(this.signer.computePubkey()).substr(2)],
+            ['signature', utils.hexlify(sig).substr(2)]
+        ]));
+
+        this.transactions.forEach((tx, i) => {
+            tx.signature = signatures[i];
+            tx.feeToken = tx.feeTokenId;
+            tx.token = tx.tokenId;
+            if (tx.amount) {
+                tx.amount = ethers.BigNumber.from(tx.amount).toString();
+            }
+            tx.fee = ethers.BigNumber.from(tx.fee).toString();
+        });
         // TODO check that signatures are correct
+        // TODO client must pay the fees
+        // TODO add more tests
+        // TODO calculate hash before sending
         // check that client's funds are in place
         const swapAccount = await this.syncWallet.provider.getState(this.swapAddress);
-        if (swapAccount.commited.balances[this.swapData.sell.token] < this.swapData.sell.amount) {
+        if (swapAccount.committed.balances[this.swapData.sell.token] < this.swapData.sell.amount) {
             throw new Error('Client did not deposit funds');
         }
+        // TODO provider push pay their part of swap
+        console.log('submitting txs')
         let hashes = [];
         for (const tx of this.transactions) {
-            const transaction = await zksync.wallet.submitSignedTransaction({ tx }, this.syncWallet.provider);
-            hashes.push(transaction.txHash);
+            console.log(tx);
+            const hash = await this.syncWallet.provider.submitTx(tx);
+            hashes.push(hash);
+            console.log(hash)
         }
         return hashes;
     }

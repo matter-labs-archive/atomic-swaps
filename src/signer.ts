@@ -1,5 +1,6 @@
 import { MusigBN256WasmSigner, MusigBN256WasmAggregatedPubkey } from 'musig-bindings';
 import { utils, BytesLike } from 'ethers';
+import { rescueHashTx } from 'zksync-crypto';
 import * as crypto from 'crypto';
 
 export class MusigSigner {
@@ -40,7 +41,8 @@ export class MusigSigner {
     }
 
     sign(privkey: BytesLike, message: BytesLike, index: number): Uint8Array {
-        return this.signers[index].sign(utils.arrayify(privkey), utils.arrayify(message));
+        const hash = rescueHashTx(utils.arrayify(message));
+        return this.signers[index].sign(utils.arrayify(privkey), hash);
     }
 
     receiveSignatureShares(signature_shares: BytesLike[], index: number): Uint8Array {
