@@ -1,9 +1,9 @@
 import * as zksync from 'zksync';
-import { pubKeyHash, private_key_to_pubkey, privateKeyFromSeed } from 'zksync-crypto';
+import { pubKeyHash, rescueHashTx } from 'zksync-crypto';
 import { ethers, utils } from 'ethers';
 import { MusigSigner } from './signer';
 import { SwapData, Network } from './types';
-import { transpose } from './utils';
+import { transpose, getSyncKeys } from './utils';
 
 export class Swap {
     constructor(
@@ -12,18 +12,20 @@ export class Swap {
         public finishTx: zksync.types.Transfer,
         public cancelTx: zksync.types.Transfer,
         private provider: zksync.Provider
-    ) {}
+    ) {
+
+    }
 
     async finish() {
-        const receipt = await zksync.wallet.submitSignedTransaction({ tx: this.finishTx }, this.provider);
-        await receipt.awaitReceipt();
-        return receipt.txHash;
+        const handle = await zksync.wallet.submitSignedTransaction({ tx: this.finishTx }, this.provider);
+        await handle.awaitReceipt();
+        return handle.txHash;
     }
 
     async cancel() {
-        const receipt = await zksync.wallet.submitSignedTransaction({ tx: this.cancelTx }, this.provider);
-        await receipt.awaitReceipt();
-        return receipt.txHash;
+        const handle = await zksync.wallet.submitSignedTransaction({ tx: this.cancelTx }, this.provider);
+        await handle.awaitReceipt();
+        return handle.txHash;
     }
 
     async wait(hash: string) {
@@ -33,7 +35,6 @@ export class Swap {
 
 export class SwapClient {
     private signer: MusigSigner;
-    private signatures: Uint8Array[];
     private commitments: Uint8Array[];
     private swapData: SwapData;
     private swapAddress: string;
@@ -48,22 +49,8 @@ export class SwapClient {
 
         const syncProvider = await zksync.getDefaultProvider(network, 'HTTP');
         const ethWallet = new ethers.Wallet(privateKey).connect(ethProvider);
-
         const syncWallet = await zksync.Wallet.fromEthSigner(ethWallet, syncProvider);
-        let chainID = 1;
-        if (ethWallet.provider) {
-            const network = await ethWallet.provider.getNetwork();
-            chainID = network.chainId;
-        }
-        let message = "Access zkSync account.\n\nOnly sign this message for a trusted client!";
-        if (chainID !== 1) {
-            message += `\nChain ID: ${chainID}.`;
-        }
-        const signedBytes = zksync.utils.getSignedBytesFromMessage(message, false);
-        const signature = await zksync.utils.signMessagePersonalAPI(ethWallet, signedBytes);
-        const seed = ethers.utils.arrayify(signature);
-        const privkey = privateKeyFromSeed(seed);
-        const pubkey = private_key_to_pubkey(privkey);
+        const { privkey, pubkey } = await getSyncKeys(ethWallet);
         return new SwapClient(utils.hexlify(privkey), utils.hexlify(pubkey), syncWallet);
     }
 
@@ -111,7 +98,8 @@ export class SwapClient {
     }) {
         // TODO check that transactions are correct before we sign them
         this.signer.receiveCommitments(transpose([data.commitments, this.commitments]));
-        this.signatures = [];
+        let signatures = [];
+        let shares = [];
         for (let i = 0; i < 5; i++) {
             let bytes: Uint8Array;
             if (data.transactions[i].type == 'Transfer') {
@@ -121,13 +109,23 @@ export class SwapClient {
             } else if (data.transactions[i].type = 'ChangePubKey') {
                 bytes = this.syncWallet.signer.changePubKeySignBytes(data.transactions[i], 'contracts-4')
             }
-            this.signatures.push(this.signer.sign(this.privateKey, bytes, i));
+            const share = this.signer.sign(this.privateKey, bytes, i);
+            const signature = this.signer.receiveSignatureShares([data.signatures[i], share], i); 
+            shares.push(share);
+            signatures.push(signature);
+            if (!this.signer.verify(bytes, signature)) {
+                throw new Error('Provided signature shares were invalid');
+            }
         }
-        const signatures = this.signatures.map((share, i) =>
-            this.signer.receiveSignatureShares([data.signatures[i], share], i)
-        );
-        data.transactions.forEach((tx, i) => (tx.signature = signatures[i]));
-        // TODO check that signatures are correct before we transfer funds
+        data.transactions.forEach((tx, i) => { 
+            tx.signature = signatures[i];
+            tx.feeToken = tx.feeTokenId;
+            tx.token = tx.tokenId;
+            if (tx.amount) {
+                tx.amount = ethers.BigNumber.from(tx.amount).toString();
+            }
+            tx.fee = ethers.BigNumber.from(tx.fee).toString();
+        });
         const transfer = await this.syncWallet.syncTransfer({
             to: this.swapAddress,
             amount: this.swapData.sell.amount.add(data.transactions[0].fee).add(data.transactions[2].fee),
@@ -142,6 +140,6 @@ export class SwapClient {
             data.transactions[3],
             this.syncWallet.provider
         );
-        return { swap, signatures: this.signatures };
+        return { swap, signatures: shares };
     }
 }
