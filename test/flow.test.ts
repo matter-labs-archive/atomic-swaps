@@ -2,7 +2,7 @@ import { expect } from 'chai';
 import { SwapProvider } from '../src/provider';
 import { SwapClient } from '../src/client';
 import { SwapData } from '../src/types';
-import { ethers, utils } from 'ethers';
+import { ethers, utils, BigNumber } from 'ethers';
 import * as zksync from 'zksync';
 import fs from 'fs';
 
@@ -46,7 +46,6 @@ describe('Test suite', () => {
             amount: utils.parseEther('2.0')
         });
         await depositETH.awaitReceipt();
-        console.log('deposited eth');
         const depositDAI = await richWallet.depositToSyncFromEthereum({
             depositTo: providerWallet.address,
             token: 'DAI',
@@ -54,7 +53,6 @@ describe('Test suite', () => {
             approveDepositAmountForERC20: true
         });
         await depositDAI.awaitReceipt();
-        console.log('deposited dai');
 
         const syncClientWallet = await zksync.Wallet.fromEthSigner(clientWallet, syncProvider);
         const syncProviderWallet = await zksync.Wallet.fromEthSigner(providerWallet, syncProvider);
@@ -73,25 +71,35 @@ describe('Test suite', () => {
             });
             await changepubkey.awaitReceipt();
         }
-        console.log('changepubkeyed');
     });
 
     it('should perform atomic swap', async () => {
-        let response = await provider.createSwap(swapData, client.getPubkey(), client.getAddress());
-        console.log('provider received swap data');
+        const syncProvider = await zksync.getDefaultProvider('localhost', 'HTTP');
+        const providerBalance = (await syncProvider.getState(provider.address())).committed.balances;
+        const clientBalance = (await syncProvider.getState(client.address())).committed.balances;
+        expect(providerBalance.ETH).to.not.exist;
+        expect(clientBalance.DAI).to.not.exist;
+
+        let response = await provider.prepareSwap(swapData, client.pubkey(), client.address());
+        console.log('    provider prepared for the swap');
         let data = await client.prepareSwap(swapData, response.publicKey, response.precommitments);
-        console.log('client prepared for swap');
-        let txs = await provider.getTransactions(data);
-        console.log('client received semi-signed transactions');
-        let { swap, signatures } = await client.createSwap(txs);
-        console.log('swap created');
-        await provider.prepareSwap(signatures);
-        console.log('swap prepared');
+        console.log('    client prepared for the swap');
+        let txs = await provider.signSwap(data);
+        console.log('    provider signed transactions');
+        let { swap, shares } = await client.signSwap(txs);
+        console.log('    client signed transactions');
+        await provider.checkSwap(shares);
+        console.log('    provider checked swap validity');
         await Promise.all([swap.wait(), (async () => {
             await new Promise(r => setTimeout(r, 5000));
             await provider.depositFunds();
-            await provider.finalize();
+            await provider.finalizeSwap();
         })()]);
-        console.log('swap finalized');
+        console.log('    provider finalized the swap');
+
+        const newProviderBalance = (await syncProvider.getState(provider.address())).committed.balances;
+        const newClientBalance = (await syncProvider.getState(client.address())).committed.balances;
+        expect(newProviderBalance.ETH).to.eq(utils.parseEther('1.0').toString());
+        expect(newClientBalance.DAI).to.eq(utils.parseUnits('1000.0', 18).toString());
     });
 });

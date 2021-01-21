@@ -2,24 +2,18 @@ import * as zksync from 'zksync';
 import { pubKeyHash } from 'zksync-crypto';
 import { ethers, utils } from 'ethers';
 import { MusigSigner } from './signer';
-import { SwapData, SchnorrData, Network } from './types';
+import { SwapData, SchnorrData, Network, Deal, Fees } from './types';
 import { transpose, getSyncKeys, getSignBytes } from './utils';
-
-type Deal = {
-    token: zksync.types.TokenLike;
-    amount: ethers.BigNumber;
-};
 
 export class SwapProvider {
     private signer: MusigSigner;
-    private transactions: any[] = [];
-    private signatures: Uint8Array[];
+    private transactions: any[];
+    private shares: Uint8Array[];
     private swapData: SwapData;
     private schnorrData: SchnorrData = {};
     private pubKeyHash: Uint8Array;
     private swapAddress: string;
     private clientAddress: string;
-    private messages: Uint8Array[];
     constructor(private privateKey: string, private publicKey: string, private syncWallet: zksync.Wallet) {}
 
     static async init(privateKey: string, network: Network) {
@@ -35,15 +29,15 @@ export class SwapProvider {
         return new SwapProvider(utils.hexlify(privkey), utils.hexlify(pubkey), syncWallet);
     }
 
-    getAddress() {
+    address() {
         return this.syncWallet.address();
     }
 
-    getPubkey() {
+    pubkey() {
         return this.publicKey;
     }
 
-    async createSwap(
+    async prepareSwap(
         data: SwapData,
         publicKey: string,
         clientAddress: string,
@@ -68,47 +62,48 @@ export class SwapProvider {
         };
     }
 
-    async getTransactions(data: SchnorrData, withdraw: 'L1' | 'L2' = 'L2') {
-        this.schnorrData.commitments = this.signer.receivePrecommitments(
-            transpose([this.schnorrData.precommitments, data.precommitments])
-        );
-        this.signer.receiveCommitments(transpose([this.schnorrData.commitments, data.commitments]));
-        const swapAccount = await this.syncWallet.provider.getState(this.swapAddress);
-        if (!swapAccount.id) {
-            throw new Error("Swap Account ID not set - can't sign transactions");
-        }
-        const { totalFee: transferFeeInSoldToken } = await this.syncWallet.provider.getTransactionFee(
+    async getFees(): Promise<Fees> {
+        const { totalFee: transferSold } = await this.syncWallet.provider.getTransactionFee(
             'Transfer',
             this.syncWallet.address(),
             this.swapData.sell.token
         );
-        const { totalFee: transferFeeInBoughtToken } = await this.syncWallet.provider.getTransactionFee(
+        const { totalFee: transferBought } = await this.syncWallet.provider.getTransactionFee(
             'Transfer',
             this.syncWallet.address(),
             this.swapData.buy.token
         );
-        const { totalFee: cpkFee } = await this.syncWallet.provider.getTransactionFee(
+        const { totalFee: changePubKey } = await this.syncWallet.provider.getTransactionFee(
             { ChangePubKey: { onchainPubkeyAuth: false } },
             this.syncWallet.address(),
             this.swapData.sell.token
         );
-        const { totalFee: withdrawFee } = await this.syncWallet.provider.getTransactionFee(
+        const { totalFee: withdraw } = await this.syncWallet.provider.getTransactionFee(
             'Withdraw',
             this.syncWallet.address(),
             this.swapData.sell.token
         );
+        return { transferSold, transferBought, changePubKey, withdraw };
+    }
+
+    async getTransactions(fees: Fees, withdrawType: 'L1' | 'L2') {
+        const swapAccount = await this.syncWallet.provider.getState(this.swapAddress);
+        if (!swapAccount.id) {
+            throw new Error("Swap Account ID not set - can't sign transactions");
+        }
         const buyTokenId = this.syncWallet.provider.tokenSet.resolveTokenId(this.swapData.buy.token);
         const sellTokenId = this.syncWallet.provider.tokenSet.resolveTokenId(this.swapData.sell.token);
         const now = Math.floor(Date.now() / 1000);
-        this.transactions = [];
-        this.transactions.push({
+
+        return [
+        {
             type: 'ChangePubKey',
             accountId: swapAccount.id,
             account: swapAccount.address,
             newPkHash: 'sync:' + utils.hexlify(this.pubKeyHash).slice(2),
             nonce: 0,
             feeTokenId: sellTokenId,
-            fee: cpkFee,
+            fee: fees.changePubKey,
             validFrom: now,
             validUntil: zksync.utils.MAX_TIMESTAMP,
             ethAuthData: {
@@ -117,98 +112,104 @@ export class SwapProvider {
                 saltArg: this.swapData.create2.salt,
                 codeHash: this.swapData.create2.hash
             }
-        });
-        this.transactions.push({
+        },
+
+        {
             type: 'Transfer',
             tokenId: buyTokenId,
             accountId: swapAccount.id,
             from: swapAccount.address,
             to: this.clientAddress,
             amount: this.swapData.buy.amount,
-            fee: transferFeeInBoughtToken,
+            fee: fees.transferBought,
             feeTokenId: buyTokenId,
             nonce: 1,
             validFrom: now,
             validUntil: now + this.swapData.timeout
-        });
+        },
 
-        if (withdraw == 'L1') {
-            this.transactions.push({
-                type: 'Withdraw',
-                tokenId: sellTokenId,
-                accoundId: swapAccount.id,
-                from: swapAccount.address,
-                ethAddress: this.syncWallet.address(),
-                amount: this.swapData.sell.amount,
-                fee: withdrawFee,
-                feeTokenId: sellTokenId,
-                nonce: 2,
-                validFrom: now,
-                validUntil: zksync.utils.MAX_TIMESTAMP
-            });
-        } else {
-            this.transactions.push({
-                type: 'Transfer',
-                tokenId: sellTokenId,
-                accountId: swapAccount.id,
-                from: swapAccount.address,
-                to: this.syncWallet.address(),
-                amount: this.swapData.sell.amount,
-                fee: transferFeeInSoldToken,
-                feeTokenId: sellTokenId,
-                nonce: 2,
-                validFrom: now,
-                validUntil: zksync.utils.MAX_TIMESTAMP
-            });
-        }
+        (withdrawType == 'L1') ? {
+            type: 'Withdraw',
+            tokenId: sellTokenId,
+            accoundId: swapAccount.id,
+            from: swapAccount.address,
+            ethAddress: this.syncWallet.address(),
+            amount: this.swapData.sell.amount,
+            fee: fees.withdraw,
+            feeTokenId: sellTokenId,
+            nonce: 2,
+            validFrom: now,
+            validUntil: zksync.utils.MAX_TIMESTAMP
+        } : {
+            type: 'Transfer',
+            tokenId: sellTokenId,
+            accountId: swapAccount.id,
+            from: swapAccount.address,
+            to: this.syncWallet.address(),
+            amount: this.swapData.sell.amount,
+            fee: fees.transferSold,
+            feeTokenId: sellTokenId,
+            nonce: 2,
+            validFrom: now,
+            validUntil: zksync.utils.MAX_TIMESTAMP
+        },
 
-        this.transactions.push({
+        {
             type: 'Transfer',
             tokenId: sellTokenId,
             accountId: swapAccount.id,
             from: swapAccount.address,
             to: this.clientAddress,
             amount: this.swapData.sell.amount,
-            fee: transferFeeInSoldToken,
+            fee: fees.transferSold,
             feeTokenId: sellTokenId,
             nonce: 1,
             validFrom: now + this.swapData.timeout,
             validUntil: zksync.utils.MAX_TIMESTAMP
-        });
-        this.transactions.push({
+        },
+
+        {
             type: 'Transfer',
             tokenId: buyTokenId,
             accountId: swapAccount.id,
             from: swapAccount.address,
             to: this.syncWallet.address(),
             amount: 0,
-            fee: transferFeeInBoughtToken,
+            fee: fees.transferBought,
             feeTokenId: buyTokenId,
             nonce: 2,
             validFrom: now + this.swapData.timeout,
             validUntil: zksync.utils.MAX_TIMESTAMP
-        });
+        }];
+    }
 
+    async signSwap(data: SchnorrData, withdrawType: 'L1' | 'L2' = 'L2') {
+        this.schnorrData.commitments = this.signer.receivePrecommitments(
+            transpose([this.schnorrData.precommitments, data.precommitments])
+        );
+        this.signer.receiveCommitments(transpose([this.schnorrData.commitments, data.commitments]));
+        const fees = await this.getFees();
+        this.transactions = await this.getTransactions(fees, withdrawType);
         const privateKey = utils.arrayify(this.privateKey);
-        this.signatures = [];
-        this.messages = [];
+        this.shares = [];
 
         for (let i = 0; i < 5; i++) {
             const bytes = getSignBytes(this.transactions[i], this.syncWallet.signer);
-            this.messages.push(bytes);
-            this.signatures.push(this.signer.sign(privateKey, bytes, i));
+            this.shares.push(this.signer.sign(privateKey, bytes, i));
         }
+
         return {
             commitments: this.schnorrData.commitments,
-            signatures: this.signatures,
+            shares: this.shares,
             transactions: this.transactions
         };
     }
 
-    async prepareSwap(signatureShares: Uint8Array[]) {
+    async checkSwap(signatureShares: Uint8Array[]) {
         let signatures = signatureShares.map((share, i) => {
-            const signature = this.signer.receiveSignatureShares([this.signatures[i], share], i);
-            if (!this.signer.verify(this.messages[i], signature)) {
+            const signature = this.signer.receiveSignatureShares([this.shares[i], share], i);
+            const bytes = getSignBytes(this.transactions[i], this.syncWallet.signer);
+            if (!this.signer.verify(bytes, signature)) {
                 throw new Error('Provided signature shares were invalid');
             }
             return {
@@ -241,11 +242,10 @@ export class SwapProvider {
         await handle.awaitReceipt();
     }
 
-    async finalize() {
+    async finalizeSwap() {
         for (const tx of this.transactions.slice(0, 3)) {
             const handle = await zksync.wallet.submitSignedTransaction({ tx }, this.syncWallet.provider);
             await handle.awaitReceipt();
-            console.log(handle.txHash);
         }
     }
 }
