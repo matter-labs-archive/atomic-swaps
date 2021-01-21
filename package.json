@@ -20,7 +20,7 @@
         "typescript": "^4.1.3"
     },
     "scripts": {
-        "build": "tsc -b",
+        "build": "tsc -b && solc --bin -o build rescuer.sol",
         "test": "mocha --no-timeout -r ts-node/register test/*.test.ts",
         "fmt": "prettier --write {src,test}/*.ts"
     },

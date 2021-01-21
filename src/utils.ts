@@ -12,7 +12,7 @@ export async function getSyncKeys(ethWallet: ethers.Wallet) {
         const network = await ethWallet.provider.getNetwork();
         chainID = network.chainId;
     }
-    let message = "Access zkSync account.\n\nOnly sign this message for a trusted client!";
+    let message = 'Access zkSync account.\n\nOnly sign this message for a trusted client!';
     if (chainID !== 1) {
         message += `\nChain ID: ${chainID}.`;
     }
@@ -20,6 +20,6 @@ export async function getSyncKeys(ethWallet: ethers.Wallet) {
     const signature = await zksync.utils.signMessagePersonalAPI(ethWallet, signedBytes);
     const seed = ethers.utils.arrayify(signature);
     const privkey = privateKeyFromSeed(seed);
-    const pubkey = private_key_to_pubkey(privkey)
+    const pubkey = private_key_to_pubkey(privkey);
     return { privkey, pubkey };
 }

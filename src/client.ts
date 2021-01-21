@@ -12,9 +12,7 @@ export class Swap {
         public finishTx: zksync.types.Transfer,
         public cancelTx: zksync.types.Transfer,
         private provider: zksync.Provider
-    ) {
-
-    }
+    ) {}
 
     async finish() {
         const handle = await zksync.wallet.submitSignedTransaction({ tx: this.finishTx }, this.provider);
@@ -68,14 +66,11 @@ export class SwapClient {
         const precommitments = this.signer.computePrecommitments();
         this.commitments = this.signer.receivePrecommitments(transpose([providerPrecommitments, precommitments]));
         this.pubKeyHash = pubKeyHash(this.signer.computePubkey());
-        this.swapAddress = zksync.utils.getCREATE2AddressAndSalt(
-            utils.hexlify(this.pubKeyHash),
-            {
-                creatorAddress: this.syncWallet.address(),
-                saltArg: data.create2.salt,
-                codeHash: data.create2.hash
-            }
-        ).address;
+        this.swapAddress = zksync.utils.getCREATE2AddressAndSalt(utils.hexlify(this.pubKeyHash), {
+            creatorAddress: this.syncWallet.address(),
+            saltArg: data.create2.salt,
+            codeHash: data.create2.hash
+        }).address;
         const swapAccount = await this.syncWallet.provider.getState(this.swapAddress);
         if (!swapAccount.id) {
             const tx = await this.syncWallet.syncTransfer({
@@ -91,11 +86,7 @@ export class SwapClient {
         };
     }
 
-    async createSwap(data: {
-        commitments: Uint8Array[];
-        signatures: Uint8Array[];
-        transactions: any[];
-    }) {
+    async createSwap(data: { commitments: Uint8Array[]; signatures: Uint8Array[]; transactions: any[] }) {
         // TODO check that transactions are correct before we sign them
         this.signer.receiveCommitments(transpose([data.commitments, this.commitments]));
         let signatures = [];
@@ -106,18 +97,18 @@ export class SwapClient {
                 bytes = this.syncWallet.signer.transferSignBytes(data.transactions[i], 'contracts-4');
             } else if (data.transactions[i].type == 'Withdraw') {
                 bytes = this.syncWallet.signer.withdrawSignBytes(data.transactions[i], 'contracts-4');
-            } else if (data.transactions[i].type = 'ChangePubKey') {
-                bytes = this.syncWallet.signer.changePubKeySignBytes(data.transactions[i], 'contracts-4')
+            } else if (data.transactions[i].type == 'ChangePubKey') {
+                bytes = this.syncWallet.signer.changePubKeySignBytes(data.transactions[i], 'contracts-4');
             }
             const share = this.signer.sign(this.privateKey, bytes, i);
-            const signature = this.signer.receiveSignatureShares([data.signatures[i], share], i); 
+            const signature = this.signer.receiveSignatureShares([data.signatures[i], share], i);
             shares.push(share);
             signatures.push(signature);
             if (!this.signer.verify(bytes, signature)) {
                 throw new Error('Provided signature shares were invalid');
             }
         }
-        data.transactions.forEach((tx, i) => { 
+        data.transactions.forEach((tx, i) => {
             tx.signature = signatures[i];
             tx.feeToken = tx.feeTokenId;
             tx.token = tx.tokenId;
