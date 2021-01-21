@@ -20,7 +20,9 @@ describe('Test suite', () => {
             token: 'DAI',
             amount: utils.parseUnits('1000.0', 18)
         },
-        timeout: 600,
+        // ten minutes since now
+        timeout: Math.floor(Date.now() / 1000) + 600,
+        withdrawType: 'L2',
         create2: {
             salt: utils.keccak256('0xdeadbeef'),
             hash: utils.keccak256('0x' + fs.readFileSync('build/Rescuer.bin').toString())
@@ -82,7 +84,7 @@ describe('Test suite', () => {
 
         let response = await provider.prepareSwap(swapData, client.pubkey(), client.address());
         console.log('    provider prepared for the swap');
-        let data = await client.prepareSwap(swapData, response.publicKey, response.precommitments);
+        let data = await client.prepareSwap(swapData, response.publicKey, response.address, response.precommitments);
         console.log('    client prepared for the swap');
         let txs = await provider.signSwap(data);
         console.log('    provider signed transactions');
@@ -90,11 +92,14 @@ describe('Test suite', () => {
         console.log('    client signed transactions');
         await provider.checkSwap(shares);
         console.log('    provider checked swap validity');
-        await Promise.all([swap.wait(), (async () => {
-            await new Promise(r => setTimeout(r, 5000));
-            await provider.depositFunds();
-            await provider.finalizeSwap();
-        })()]);
+        await Promise.all([
+            swap.wait(),
+            (async () => {
+                await new Promise((r) => setTimeout(r, 5000));
+                await provider.depositFunds();
+                await provider.finalizeSwap();
+            })()
+        ]);
         console.log('    provider finalized the swap');
 
         const newProviderBalance = (await syncProvider.getState(provider.address())).committed.balances;

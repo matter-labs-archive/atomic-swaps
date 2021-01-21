@@ -3,7 +3,7 @@ import { pubKeyHash } from 'zksync-crypto';
 import { ethers, utils } from 'ethers';
 import { MusigSigner } from './signer';
 import { SwapData, Network } from './types';
-import { transpose, getSyncKeys, getSignBytes } from './utils';
+import { transpose, getSyncKeys, getSignBytes, getTransactions } from './utils';
 
 export class Swap {
     constructor(
@@ -37,6 +37,7 @@ export class SwapClient {
     private swapData: SwapData;
     private swapAddress: string;
     private pubKeyHash: Uint8Array;
+    private transactions: any[];
     constructor(private privateKey: string, private publicKey: string, private syncWallet: zksync.Wallet) {}
 
     static async init(privateKey: string, network: Network) {
@@ -60,14 +61,19 @@ export class SwapClient {
         return this.syncWallet.address();
     }
 
-    async prepareSwap(data: SwapData, providerPubkey: string, providerPrecommitments: Uint8Array[]) {
+    async prepareSwap(
+        data: SwapData,
+        providerPubkey: string,
+        providerAddress: string,
+        providerPrecommitments: Uint8Array[]
+    ) {
         this.swapData = data;
         this.signer = new MusigSigner([providerPubkey, this.publicKey], 1, 5);
         const precommitments = this.signer.computePrecommitments();
         this.commitments = this.signer.receivePrecommitments(transpose([providerPrecommitments, precommitments]));
         this.pubKeyHash = pubKeyHash(this.signer.computePubkey());
         this.swapAddress = zksync.utils.getCREATE2AddressAndSalt(utils.hexlify(this.pubKeyHash), {
-            creatorAddress: this.syncWallet.address(),
+            creatorAddress: this.address(),
             saltArg: data.create2.salt,
             codeHash: data.create2.hash
         }).address;
@@ -80,20 +86,28 @@ export class SwapClient {
             });
             await tx.awaitReceipt();
         }
+
+        this.transactions = await getTransactions(
+            this.swapData,
+            this.address(),
+            providerAddress,
+            this.swapAddress,
+            this.pubKeyHash,
+            this.syncWallet.provider
+        );
         return {
             precommitments,
             commitments: this.commitments
         };
     }
 
-    async signSwap(data: { commitments: Uint8Array[]; shares: Uint8Array[]; transactions: any[] }) {
-        // TODO check that transactions are correct before we sign them
+    async signSwap(data: { commitments: Uint8Array[]; shares: Uint8Array[] }) {
         this.signer.receiveCommitments(transpose([data.commitments, this.commitments]));
         let signatures = [];
         let shares = [];
 
         for (let i = 0; i < 5; i++) {
-            const bytes = getSignBytes(data.transactions[i], this.syncWallet.signer);
+            const bytes = getSignBytes(this.transactions[i], this.syncWallet.signer);
             const share = this.signer.sign(this.privateKey, bytes, i);
             const signature = this.signer.receiveSignatureShares([data.shares[i], share], i);
             shares.push(share);
@@ -106,7 +120,7 @@ export class SwapClient {
             });
         }
 
-        data.transactions.forEach((tx, i) => {
+        this.transactions.forEach((tx, i) => {
             tx.signature = signatures[i];
             tx.feeToken = tx.feeTokenId;
             tx.token = tx.tokenId;
@@ -118,14 +132,14 @@ export class SwapClient {
 
         const transfer = await this.syncWallet.syncTransfer({
             to: this.swapAddress,
-            amount: this.swapData.sell.amount.add(data.transactions[0].fee).add(data.transactions[2].fee),
+            amount: this.swapData.sell.amount.add(this.transactions[0].fee).add(this.transactions[2].fee),
             token: this.swapData.sell.token
         });
         await transfer.awaitReceipt();
-        const finalHash = utils.sha256(this.syncWallet.signer.transferSignBytes(data.transactions[1], 'contracts-4'));
+        const finalHash = utils.sha256(getSignBytes(this.transactions[1], this.syncWallet.signer));
         const swap = new Swap(
-            data.transactions[1],
-            data.transactions[3],
+            this.transactions[1],
+            this.transactions[3],
             'sync-tx:' + finalHash.slice(2),
             this.syncWallet.provider
         );

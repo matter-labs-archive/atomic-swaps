@@ -10,6 +10,7 @@ export interface SwapData {
     sell: Deal;
     buy: Deal;
     timeout: number;
+    withdrawType: 'L1' | 'L2';
     create2: {
         salt: string;
         hash: string;
@@ -19,13 +20,6 @@ export interface SwapData {
 export interface SchnorrData {
     precommitments?: Uint8Array[];
     commitments?: Uint8Array[];
-}
-
-export interface Fees {
-    transferSold: ethers.BigNumber;
-    transferBought: ethers.BigNumber;
-    withdraw: ethers.BigNumber;
-    changePubKey: ethers.BigNumber;
 }
 
 export type Network = 'localhost' | 'mainnet' | 'ropsten' | 'rinkeby';
