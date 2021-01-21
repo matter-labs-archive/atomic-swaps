@@ -58,14 +58,16 @@ export class SwapProvider {
         this.signer = new MusigSigner([this.publicKey, publicKey], 0, 5);
         this.schnorrData.precommitments = this.signer.computePrecommitments();
         this.swapData = data;
-        // this.clientAddress = ethers.utils.computeAddress(publicKey);
         this.clientAddress = clientAddress;
         this.pubKeyHash = pubKeyHash(this.signer.computePubkey());
-        this.swapAddress = ethers.utils.getCreate2Address(
-            this.clientAddress,
-            utils.keccak256(utils.concat([this.pubKeyHash, data.create2.salt])),
-            data.create2.hash
-        );
+        this.swapAddress = zksync.utils.getCREATE2AddressAndSalt(
+            utils.hexlify(this.pubKeyHash),
+            {
+                creatorAddress: this.clientAddress,
+                saltArg: data.create2.salt,
+                codeHash: data.create2.hash
+            }
+        ).address;
         return {
             publicKey: this.publicKey,
             precommitments: this.schnorrData.precommitments
@@ -81,10 +83,15 @@ export class SwapProvider {
         if (!swapAccount.id) {
             throw new Error("Swap Account ID not set - can't sign transactions");
         }
-        const { totalFee: transferFee } = await this.syncWallet.provider.getTransactionFee(
+        const { totalFee: transferFeeInSoldToken } = await this.syncWallet.provider.getTransactionFee(
             'Transfer',
             this.syncWallet.address(),
             this.swapData.sell.token
+        );
+        const { totalFee: transferFeeInBoughtToken } = await this.syncWallet.provider.getTransactionFee(
+            'Transfer',
+            this.syncWallet.address(),
+            this.swapData.buy.token
         );
         const { totalFee: cpkFee } = await this.syncWallet.provider.getTransactionFee(
             { ChangePubKey: { onchainPubkeyAuth: false } },
@@ -96,9 +103,9 @@ export class SwapProvider {
             this.syncWallet.address(),
             this.swapData.sell.token
         );
-        const tokenSet = this.syncWallet.provider.tokenSet;
+        const buyTokenId = this.syncWallet.provider.tokenSet.resolveTokenId(this.swapData.buy.token);
+        const sellTokenId = this.syncWallet.provider.tokenSet.resolveTokenId(this.swapData.sell.token);
         const now = Math.floor(Date.now() / 1000);
-        const feeTokenId = tokenSet.resolveTokenId(this.swapData.sell.token);
         this.transactions = [];
         this.transactions.push({
             type: 'ChangePubKey',
@@ -106,7 +113,7 @@ export class SwapProvider {
             account: swapAccount.address,
             newPkHash: 'sync:'+utils.hexlify(this.pubKeyHash).slice(2),
             nonce: 0,
-            feeTokenId,
+            feeTokenId: sellTokenId,
             fee: cpkFee,
             validFrom: now,
             validUntil: zksync.utils.MAX_TIMESTAMP,
@@ -119,13 +126,13 @@ export class SwapProvider {
         });
         this.transactions.push({
             type: 'Transfer',
-            tokenId: tokenSet.resolveTokenId(this.swapData.buy.token),
+            tokenId: buyTokenId,
             accountId: swapAccount.id,
             from: swapAccount.address,
             to: this.clientAddress,
             amount: this.swapData.buy.amount,
-            fee: transferFee,
-            feeTokenId,
+            fee: transferFeeInBoughtToken,
+            feeTokenId: buyTokenId,
             nonce: 1,
             validFrom: now,
             validUntil: now + timeout
@@ -134,13 +141,13 @@ export class SwapProvider {
         if (withdraw == 'L1') {
             this.transactions.push({
                 type: 'Withdraw',
-                tokenId: tokenSet.resolveTokenId(this.swapData.sell.token),
+                tokenId: sellTokenId,
                 accoundId: swapAccount.id,
                 from: swapAccount.address,
                 ethAddress: this.syncWallet.address(),
                 amount: this.swapData.sell.amount,
                 fee: withdrawFee,
-                feeTokenId,
+                feeTokenId: sellTokenId,
                 nonce: 2,
                 validFrom: now,
                 validUntil: zksync.utils.MAX_TIMESTAMP
@@ -148,13 +155,13 @@ export class SwapProvider {
         } else {
             this.transactions.push({
                 type: 'Transfer',
-                tokenId: tokenSet.resolveTokenId(this.swapData.sell.token),
+                tokenId: sellTokenId,
                 accountId: swapAccount.id,
                 from: swapAccount.address,
                 to: this.syncWallet.address(),
                 amount: this.swapData.sell.amount,
-                fee: transferFee,
-                feeTokenId,
+                fee: transferFeeInSoldToken,
+                feeTokenId: sellTokenId,
                 nonce: 2,
                 validFrom: now,
                 validUntil: zksync.utils.MAX_TIMESTAMP
@@ -163,26 +170,26 @@ export class SwapProvider {
 
         this.transactions.push({
             type: 'Transfer',
-            tokenId: tokenSet.resolveTokenId(this.swapData.sell.token),
+            tokenId: sellTokenId,
             accountId: swapAccount.id,
             from: swapAccount.address,
             to: this.clientAddress,
             amount: this.swapData.sell.amount,
-            fee: transferFee,
-            feeTokenId,
+            fee: transferFeeInSoldToken,
+            feeTokenId: sellTokenId,
             nonce: 1,
             validFrom: now + timeout,
             validUntil: zksync.utils.MAX_TIMESTAMP
         });
         this.transactions.push({
             type: 'Transfer',
-            tokenId: tokenSet.resolveTokenId(this.swapData.buy.token),
+            tokenId: buyTokenId,
             accountId: swapAccount.id,
             from: swapAccount.address,
             to: this.syncWallet.address(),
             amount: 0,
-            fee: transferFee,
-            feeTokenId,
+            fee: transferFeeInBoughtToken,
+            feeTokenId: buyTokenId,
             nonce: 2,
             validFrom: now + timeout,
             validUntil: zksync.utils.MAX_TIMESTAMP
@@ -192,11 +199,14 @@ export class SwapProvider {
         this.signatures = [];
 
         for (let i = 0; i < 5; i++) {
-            const bytes =
-                i == 0
-                    ? this.syncWallet.signer.changePubKeySignBytes(this.transactions[i])
-                    // TODO: or withdrawSignBytes
-                    : this.syncWallet.signer.transferSignBytes(this.transactions[i]);
+            let bytes: Uint8Array;
+            if (this.transactions[i].type == 'Transfer') {
+                bytes = this.syncWallet.signer.transferSignBytes(this.transactions[i], 'contracts-4');
+            } else if (this.transactions[i].type == 'Withdraw') {
+                bytes = this.syncWallet.signer.withdrawSignBytes(this.transactions[i], 'contracts-4');
+            } else if (this.transactions[i].type = 'ChangePubKey') {
+                bytes = this.syncWallet.signer.changePubKeySignBytes(this.transactions[i], 'contracts-4')
+            }
             this.signatures.push(this.signer.sign(privateKey, bytes, i));
         }
         return {
@@ -210,10 +220,12 @@ export class SwapProvider {
         const signaturesPacked = signatureShares.map((share, i) =>
             this.signer.receiveSignatureShares([this.signatures[i], share], i)
         );
-        const signatures = signaturesPacked.map(sig => Object.fromEntries([
-            ['pubKey', utils.hexlify(this.signer.computePubkey()).substr(2)],
-            ['signature', utils.hexlify(sig).substr(2)]
-        ]));
+        const signatures = signaturesPacked.map(sig => {
+            return {
+                pubKey: utils.hexlify(this.signer.computePubkey()).substr(2),
+                signature: utils.hexlify(sig).substr(2)
+            };
+        });
 
         this.transactions.forEach((tx, i) => {
             tx.signature = signatures[i];
@@ -227,21 +239,24 @@ export class SwapProvider {
         // TODO check that signatures are correct
         // TODO client must pay the fees
         // TODO add more tests
-        // TODO calculate hash before sending
+        // TODO client must store hashes to track txs - let signer return them
         // check that client's funds are in place
         const swapAccount = await this.syncWallet.provider.getState(this.swapAddress);
         if (swapAccount.committed.balances[this.swapData.sell.token] < this.swapData.sell.amount) {
             throw new Error('Client did not deposit funds');
         }
-        // TODO provider push pay their part of swap
+        const handle = await this.syncWallet.syncTransfer({
+            to: this.swapAddress,
+            amount: this.swapData.buy.amount.add(this.transactions[1].fee),
+            token: this.swapData.buy.token
+        });
+        await handle.awaitReceipt();
+        console.log('provider deposited funds');
         console.log('submitting txs')
-        let hashes = [];
-        for (const tx of this.transactions) {
-            console.log(tx);
-            const hash = await this.syncWallet.provider.submitTx(tx);
-            hashes.push(hash);
-            console.log(hash)
+        for (const tx of this.transactions.slice(0, 3)) {
+            const handle = await zksync.wallet.submitSignedTransaction({ tx }, this.syncWallet.provider);
+            await handle.awaitReceipt();
+            console.log(handle.txHash);
         }
-        return hashes;
     }
 }

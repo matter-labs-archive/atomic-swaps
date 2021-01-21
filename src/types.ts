@@ -4,11 +4,11 @@ import { ethers } from 'ethers';
 export interface SwapData {
     sell: {
         token: zksync.types.TokenLike;
-        amount: ethers.BigNumberish;
+        amount: ethers.BigNumber;
     };
     buy: {
         token: zksync.types.TokenLike;
-        amount: ethers.BigNumberish;
+        amount: ethers.BigNumber;
     };
     timeout: number;
     create2: {

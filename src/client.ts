@@ -81,11 +81,14 @@ export class SwapClient {
         const precommitments = this.signer.computePrecommitments();
         this.commitments = this.signer.receivePrecommitments(transpose([providerPrecommitments, precommitments]));
         this.pubKeyHash = pubKeyHash(this.signer.computePubkey());
-        this.swapAddress = ethers.utils.getCreate2Address(
-            this.syncWallet.address(),
-            utils.keccak256(utils.concat([this.pubKeyHash, data.create2.salt])),
-            data.create2.hash
-        );
+        this.swapAddress = zksync.utils.getCREATE2AddressAndSalt(
+            utils.hexlify(this.pubKeyHash),
+            {
+                creatorAddress: this.syncWallet.address(),
+                saltArg: data.create2.salt,
+                codeHash: data.create2.hash
+            }
+        ).address;
         const swapAccount = await this.syncWallet.provider.getState(this.swapAddress);
         if (!swapAccount.id) {
             const tx = await this.syncWallet.syncTransfer({
@@ -110,10 +113,14 @@ export class SwapClient {
         this.signer.receiveCommitments(transpose([data.commitments, this.commitments]));
         this.signatures = [];
         for (let i = 0; i < 5; i++) {
-            const bytes =
-                i == 0
-                    ? this.syncWallet.signer.changePubKeySignBytes(data.transactions[i])
-                    : this.syncWallet.signer.transferSignBytes(data.transactions[i]);
+            let bytes: Uint8Array;
+            if (data.transactions[i].type == 'Transfer') {
+                bytes = this.syncWallet.signer.transferSignBytes(data.transactions[i], 'contracts-4');
+            } else if (data.transactions[i].type == 'Withdraw') {
+                bytes = this.syncWallet.signer.withdrawSignBytes(data.transactions[i], 'contracts-4');
+            } else if (data.transactions[i].type = 'ChangePubKey') {
+                bytes = this.syncWallet.signer.changePubKeySignBytes(data.transactions[i], 'contracts-4')
+            }
             this.signatures.push(this.signer.sign(this.privateKey, bytes, i));
         }
         const signatures = this.signatures.map((share, i) =>
@@ -121,11 +128,13 @@ export class SwapClient {
         );
         data.transactions.forEach((tx, i) => (tx.signature = signatures[i]));
         // TODO check that signatures are correct before we transfer funds
-        this.syncWallet.syncTransfer({
+        const transfer = await this.syncWallet.syncTransfer({
             to: this.swapAddress,
-            amount: this.swapData.sell.amount,
+            amount: this.swapData.sell.amount.add(data.transactions[0].fee).add(data.transactions[2].fee),
             token: this.swapData.sell.token
         });
+        await transfer.awaitReceipt();
+        console.log('client deposited funds');
         const swap = new Swap(
             this.swapData,
             this.swapAddress,
