@@ -85,10 +85,13 @@ describe('Test suite', () => {
         console.log('client received semi-signed transactions');
         let { swap, signatures } = await client.createSwap(txs);
         console.log('swap created');
-        await provider.finalize(signatures);
+        await provider.prepareSwap(signatures);
+        console.log('swap prepared');
+        await Promise.all([swap.wait(), (async () => {
+            await new Promise(r => setTimeout(r, 5000));
+            await provider.depositFunds();
+            await provider.finalize();
+        })()]);
         console.log('swap finalized');
-        // console.log('hashes:', hashes)
-        // await swap.wait(hashes[0]) // or swap.cancel() or swap.finish()
-        // console.log('swap committed');
     });
 });

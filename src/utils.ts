@@ -23,3 +23,15 @@ export async function getSyncKeys(ethWallet: ethers.Wallet) {
     const pubkey = private_key_to_pubkey(privkey);
     return { privkey, pubkey };
 }
+
+export function getSignBytes(transaction: any, signer: zksync.Signer): Uint8Array {
+    if (transaction.type == 'Transfer') {
+        return signer.transferSignBytes(transaction, 'contracts-4');
+    } else if (transaction.type == 'Withdraw') {
+        return signer.withdrawSignBytes(transaction, 'contracts-4');
+    } else if (transaction.type == 'ChangePubKey') {
+        return signer.changePubKeySignBytes(transaction, 'contracts-4');
+    } else {
+        throw new Error('Invalid transaction type');
+    }
+}

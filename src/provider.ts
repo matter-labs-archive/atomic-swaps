@@ -3,7 +3,7 @@ import { pubKeyHash } from 'zksync-crypto';
 import { ethers, utils } from 'ethers';
 import { MusigSigner } from './signer';
 import { SwapData, SchnorrData, Network } from './types';
-import { transpose, getSyncKeys } from './utils';
+import { transpose, getSyncKeys, getSignBytes } from './utils';
 
 type Deal = {
     token: zksync.types.TokenLike;
@@ -194,14 +194,7 @@ export class SwapProvider {
         this.messages = [];
 
         for (let i = 0; i < 5; i++) {
-            let bytes: Uint8Array;
-            if (this.transactions[i].type == 'Transfer') {
-                bytes = this.syncWallet.signer.transferSignBytes(this.transactions[i], 'contracts-4');
-            } else if (this.transactions[i].type == 'Withdraw') {
-                bytes = this.syncWallet.signer.withdrawSignBytes(this.transactions[i], 'contracts-4');
-            } else if (this.transactions[i].type == 'ChangePubKey') {
-                bytes = this.syncWallet.signer.changePubKeySignBytes(this.transactions[i], 'contracts-4');
-            }
+            const bytes = getSignBytes(this.transactions[i], this.syncWallet.signer);
             this.messages.push(bytes);
             this.signatures.push(this.signer.sign(privateKey, bytes, i));
         }
@@ -212,22 +205,17 @@ export class SwapProvider {
         };
     }
 
-    async finalize(signatureShares: Uint8Array[]) {
-        const signaturesPacked = signatureShares.map((share, i) => {
+    async prepareSwap(signatureShares: Uint8Array[]) {
+        let signatures = signatureShares.map((share, i) => {
             const signature = this.signer.receiveSignatureShares([this.signatures[i], share], i);
             if (!this.signer.verify(this.messages[i], signature)) {
                 throw new Error('Provided signature shares were invalid');
             }
-            return signature;
-        });
-
-        const signatures = signaturesPacked.map((sig) => {
             return {
                 pubKey: utils.hexlify(this.signer.computePubkey()).substr(2),
-                signature: utils.hexlify(sig).substr(2)
+                signature: utils.hexlify(signature).substr(2)
             };
         });
-
         this.transactions.forEach((tx, i) => {
             tx.signature = signatures[i];
             tx.feeToken = tx.feeTokenId;
@@ -242,14 +230,18 @@ export class SwapProvider {
         if (swapAccount.committed.balances[this.swapData.sell.token] < necessaryDeposit) {
             throw new Error('Client did not deposit funds');
         }
+    }
+
+    async depositFunds() {
         const handle = await this.syncWallet.syncTransfer({
             to: this.swapAddress,
             amount: this.swapData.buy.amount.add(this.transactions[1].fee),
             token: this.swapData.buy.token
         });
         await handle.awaitReceipt();
-        console.log('provider deposited funds');
-        console.log('submitting txs');
+    }
+
+    async finalize() {
         for (const tx of this.transactions.slice(0, 3)) {
             const handle = await zksync.wallet.submitSignedTransaction({ tx }, this.syncWallet.provider);
             await handle.awaitReceipt();
