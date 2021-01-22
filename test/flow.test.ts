@@ -22,10 +22,11 @@ describe('Test suite', () => {
         },
         // ten minutes since now
         timeout: Math.floor(Date.now() / 1000) + 600,
+        // L2 is transfer, L1 is withdraw
         withdrawType: 'L2',
         create2: {
             salt: utils.keccak256('0xdeadbeef'),
-            hash: utils.keccak256('0x' + fs.readFileSync('build/Rescuer.bin').toString())
+            hash: utils.keccak256('0x' + fs.readFileSync('build/rescuer_sol_Rescuer.bin').toString())
         }
     };
 

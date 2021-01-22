@@ -8,10 +8,5 @@
         "noEmitOnError": true,
         "declaration": true
     },
-    "files": [
-        "src/index.ts",
-        "src/signer.ts",
-        "src/client.ts",
-        "src/provider.ts"
-    ]
+    "files": [ "src/index.ts" ]
 }

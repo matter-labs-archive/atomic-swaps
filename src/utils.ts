@@ -4,6 +4,8 @@ import { private_key_to_pubkey, privateKeyFromSeed } from 'zksync-crypto';
 import { SwapData } from './types';
 
 export const TOTAL_TRANSACTIONS = 5;
+export const SYNC_PREFIX = 'sync:';
+export const SYNC_TX_PREFIX = 'sync-tx:';
 
 export function transpose<T>(matrix: T[][]): T[][] {
     return matrix[0].map((_, index) => matrix.map((row) => row[index]));
@@ -36,6 +38,23 @@ export function getSignBytes(transaction: any, signer: zksync.Signer): Uint8Arra
         return signer.changePubKeySignBytes(transaction, 'contracts-4');
     } else {
         throw new Error('Invalid transaction type');
+    }
+}
+
+export function formatTx(tx: any, signature: Uint8Array, pubkey: Uint8Array) {
+    tx.signature = {
+        pubKey: utils.hexlify(pubkey).substr(2),
+        signature: utils.hexlify(signature).substr(2)
+    };
+    tx.fee = ethers.BigNumber.from(tx.fee).toString();
+    if ('feeTokenId' in tx) {
+        tx.feeToken = tx.feeTokenId;
+    }
+    if ('tokenId' in tx) {
+        tx.token = tx.tokenId;
+    }
+    if ('amount' in tx) {
+        tx.amount = ethers.BigNumber.from(tx.amount).toString();
     }
 }
 
@@ -82,7 +101,7 @@ export async function getTransactions(
         type: 'ChangePubKey',
         accountId: swapAccount.id,
         account: swapAccount.address,
-        newPkHash: 'sync:' + utils.hexlify(pubKeyHash).slice(2),
+        newPkHash: utils.hexlify(pubKeyHash).replace('0x', SYNC_PREFIX),
         nonce: 0,
         feeTokenId: sellTokenId,
         fee: fees.changePubKey,

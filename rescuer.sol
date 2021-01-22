@@ -1,9 +1,10 @@
-pragma solidity ^0.5.8;
+// SPDX-License-Identifier: MIT OR Apache-2.0
+pragma solidity ^0.7.0;
 
 contract Rescuer {
     address payable owner;
 
-    constructor(address payable _owner) public {
+    constructor(address payable _owner) {
         owner = _owner;
     }
 

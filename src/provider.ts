@@ -1,11 +1,17 @@
+/**
+ * This file contains an implementation if SwapProvider class - essentially a server-side part of the SDK
+ * @packageDocumentation
+ */
+
 import * as zksync from 'zksync';
 import { pubKeyHash } from 'zksync-crypto';
 import { ethers, utils } from 'ethers';
 import { MusigSigner } from './signer';
 import { SwapData, SchnorrData } from './types';
-import { transpose, getSyncKeys, getSignBytes, getTransactions, TOTAL_TRANSACTIONS } from './utils';
+import { transpose, getSyncKeys, getSignBytes, getTransactions, formatTx, TOTAL_TRANSACTIONS } from './utils';
 
-const PROVIDER_NUMBER = 0;
+// This is the provider's position in schnorr-musig protocol
+const PROVIDER_MUSIG_POSITION = 0;
 
 export class SwapProvider {
     private signer: MusigSigner;
@@ -16,8 +22,9 @@ export class SwapProvider {
     private pubKeyHash: Uint8Array;
     private swapAddress: string;
     private clientAddress: string;
-    constructor(private privateKey: string, private publicKey: string, private syncWallet: zksync.Wallet) {}
+    private constructor(private privateKey: string, private publicKey: string, private syncWallet: zksync.Wallet) {}
 
+    /** SwapProvider's async constructor */
     static async init(privateKey: string, ethProvider: ethers.providers.Provider, syncProvider: zksync.Provider) {
         const ethWallet = new ethers.Wallet(privateKey).connect(ethProvider);
         const syncWallet = await zksync.Wallet.fromEthSigner(ethWallet, syncProvider);
@@ -33,8 +40,11 @@ export class SwapProvider {
         return this.publicKey;
     }
 
-    async prepareSwap(data: SwapData, publicKey: string, clientAddress: string) {
-        this.signer = new MusigSigner([this.publicKey, publicKey], PROVIDER_NUMBER, TOTAL_TRANSACTIONS);
+    /**
+     * Generates precommitments for the schnorr-musig protocol
+     */
+    async prepareSwap(data: SwapData, clientPubkey: string, clientAddress: string) {
+        this.signer = new MusigSigner([this.publicKey, clientPubkey], PROVIDER_MUSIG_POSITION, TOTAL_TRANSACTIONS);
         this.schnorrData.precommitments = this.signer.computePrecommitments();
         this.swapData = data;
         this.clientAddress = clientAddress;
@@ -51,11 +61,15 @@ export class SwapProvider {
         };
     }
 
+    /**
+     * Generates all 5 transactions needed for the swap and signature shares for them
+     */
     async signSwap(data: SchnorrData) {
         this.schnorrData.commitments = this.signer.receivePrecommitments(
             transpose([this.schnorrData.precommitments, data.precommitments])
         );
         this.signer.receiveCommitments(transpose([this.schnorrData.commitments, data.commitments]));
+        // generate transactions
         this.transactions = await getTransactions(
             this.swapData,
             this.clientAddress,
@@ -64,11 +78,10 @@ export class SwapProvider {
             this.pubKeyHash,
             this.syncWallet.provider
         );
-        const privateKey = utils.arrayify(this.privateKey);
         this.shares = [];
         this.transactions.forEach((tx, i) => {
             const bytes = getSignBytes(tx, this.syncWallet.signer);
-            this.shares.push(this.signer.sign(privateKey, bytes, i));
+            this.shares.push(this.signer.sign(this.privateKey, bytes, i));
         });
 
         return {
@@ -77,34 +90,31 @@ export class SwapProvider {
         };
     }
 
+    /**
+     * Receives client's signature shares, combines with provider's own to get fully signed transactions.
+     * Verifies that produces signatures are correct, otherwise an error is thrown.
+     * Verifies that client has deposited funds to the multisig, otherwise an error is thrown.
+     */
     async checkSwap(signatureShares: Uint8Array[]) {
-        let signatures = signatureShares.map((share, i) => {
-            const signature = this.signer.receiveSignatureShares([this.shares[i], share], i);
+        const musigPubkey = this.signer.computePubkey();
+        this.transactions.forEach((tx, i) => {
+            const signature = this.signer.receiveSignatureShares([this.shares[i], signatureShares[i]], i);
             const bytes = getSignBytes(this.transactions[i], this.syncWallet.signer);
+            // this could mean that either client sent incorrect signature shares
+            // or client signed transactions containing wrong data
             if (!this.signer.verify(bytes, signature)) {
                 throw new Error('Provided signature shares were invalid');
             }
-            return {
-                pubKey: utils.hexlify(this.signer.computePubkey()).substr(2),
-                signature: utils.hexlify(signature).substr(2)
-            };
+            formatTx(tx, signature, musigPubkey);
         });
-        this.transactions.forEach((tx, i) => {
-            tx.signature = signatures[i];
-            tx.feeToken = tx.feeTokenId;
-            tx.token = tx.tokenId;
-            if (tx.amount) {
-                tx.amount = ethers.BigNumber.from(tx.amount).toString();
-            }
-            tx.fee = ethers.BigNumber.from(tx.fee).toString();
-        });
-        const swapAccount = await this.syncWallet.provider.getState(this.swapAddress);
+        const swapAccountBalance = (await this.syncWallet.provider.getState(this.swapAddress)).committed.balances;
         const necessaryDeposit = this.swapData.sell.amount.add(this.transactions[0].fee).add(this.transactions[2].fee);
-        if (swapAccount.committed.balances[this.swapData.sell.token] < necessaryDeposit) {
+        if (necessaryDeposit.gt(swapAccountBalance[this.swapData.sell.token])) {
             throw new Error('Client did not deposit funds');
         }
     }
 
+    /** Deposits provider's funds to the multisig account */
     async depositFunds() {
         const handle = await this.syncWallet.syncTransfer({
             to: this.swapAddress,
@@ -114,6 +124,7 @@ export class SwapProvider {
         await handle.awaitReceipt();
     }
 
+    /** Sends 3 transactions that will finalize the swap */
     async finalizeSwap() {
         for (const tx of this.transactions.slice(0, 3)) {
             const handle = await zksync.wallet.submitSignedTransaction({ tx }, this.syncWallet.provider);

@@ -1,0 +1,12 @@
+#!/bin/sh
+
+# Colors for the terminal output
+RED='\033[0;31m'
+NC='\033[0m'
+
+# Check that TS formatting rules are not violated.
+if ! yarn --silent prettier --check {src,test}/*.ts; then
+    echo -e "${RED}Commit error!${NC}"
+    echo "Please format the code via 'yarn fmt', cannot commit unformatted code"
+    exit 1
+fi

@@ -1,14 +1,15 @@
-import * as zksync from 'zksync';
-import { ethers } from 'ethers';
-
-export type Deal = {
-    token: zksync.types.TokenLike;
-    amount: ethers.BigNumber;
-};
+import { types } from 'zksync';
+import { BigNumber } from 'ethers';
 
 export interface SwapData {
-    sell: Deal;
-    buy: Deal;
+    sell: {
+        token: types.TokenLike;
+        amount: BigNumber;
+    };
+    buy: {
+        token: types.TokenLike;
+        amount: BigNumber;
+    };
     timeout: number;
     withdrawType: 'L1' | 'L2';
     create2: {
