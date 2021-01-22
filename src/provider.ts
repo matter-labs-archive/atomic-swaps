@@ -2,8 +2,10 @@ import * as zksync from 'zksync';
 import { pubKeyHash } from 'zksync-crypto';
 import { ethers, utils } from 'ethers';
 import { MusigSigner } from './signer';
-import { SwapData, SchnorrData, Network, Deal } from './types';
-import { transpose, getSyncKeys, getSignBytes, getTransactions } from './utils';
+import { SwapData, SchnorrData } from './types';
+import { transpose, getSyncKeys, getSignBytes, getTransactions, TOTAL_TRANSACTIONS } from './utils';
+
+const PROVIDER_NUMBER = 0;
 
 export class SwapProvider {
     private signer: MusigSigner;
@@ -16,13 +18,7 @@ export class SwapProvider {
     private clientAddress: string;
     constructor(private privateKey: string, private publicKey: string, private syncWallet: zksync.Wallet) {}
 
-    static async init(privateKey: string, network: Network) {
-        const ethProvider =
-            network == 'localhost'
-                ? new ethers.providers.JsonRpcProvider('http://localhost:8545')
-                : ethers.getDefaultProvider(network);
-
-        const syncProvider = await zksync.getDefaultProvider(network, 'HTTP');
+    static async init(privateKey: string, ethProvider: ethers.providers.Provider, syncProvider: zksync.Provider) {
         const ethWallet = new ethers.Wallet(privateKey).connect(ethProvider);
         const syncWallet = await zksync.Wallet.fromEthSigner(ethWallet, syncProvider);
         const { privkey, pubkey } = await getSyncKeys(ethWallet);
@@ -37,16 +33,8 @@ export class SwapProvider {
         return this.publicKey;
     }
 
-    async prepareSwap(
-        data: SwapData,
-        publicKey: string,
-        clientAddress: string,
-        goodDeal?: (sell: Deal, buy: Deal) => boolean
-    ) {
-        if (goodDeal && !goodDeal(data.sell, data.buy)) {
-            throw new Error('Swap is not profitable, alter token amounts');
-        }
-        this.signer = new MusigSigner([this.publicKey, publicKey], 0, 5);
+    async prepareSwap(data: SwapData, publicKey: string, clientAddress: string) {
+        this.signer = new MusigSigner([this.publicKey, publicKey], PROVIDER_NUMBER, TOTAL_TRANSACTIONS);
         this.schnorrData.precommitments = this.signer.computePrecommitments();
         this.swapData = data;
         this.clientAddress = clientAddress;
@@ -78,11 +66,10 @@ export class SwapProvider {
         );
         const privateKey = utils.arrayify(this.privateKey);
         this.shares = [];
-
-        for (let i = 0; i < 5; i++) {
-            const bytes = getSignBytes(this.transactions[i], this.syncWallet.signer);
+        this.transactions.forEach((tx, i) => {
+            const bytes = getSignBytes(tx, this.syncWallet.signer);
             this.shares.push(this.signer.sign(privateKey, bytes, i));
-        }
+        });
 
         return {
             commitments: this.schnorrData.commitments,

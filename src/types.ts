@@ -21,5 +21,3 @@ export interface SchnorrData {
     precommitments?: Uint8Array[];
     commitments?: Uint8Array[];
 }
-
-export type Network = 'localhost' | 'mainnet' | 'ropsten' | 'rinkeby';

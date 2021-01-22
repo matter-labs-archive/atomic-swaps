@@ -1,10 +1,18 @@
+// This file provides Swap and SwapClient classes - essentially a client part of the SDK
+
 import * as zksync from 'zksync';
 import { pubKeyHash } from 'zksync-crypto';
 import { ethers, utils } from 'ethers';
 import { MusigSigner } from './signer';
-import { SwapData, Network } from './types';
-import { transpose, getSyncKeys, getSignBytes, getTransactions } from './utils';
+import { SwapData } from './types';
+import { transpose, getSyncKeys, getSignBytes, getTransactions, TOTAL_TRANSACTIONS } from './utils';
 
+const CLIENT_NUMBER = 1;
+
+// Swap objects are used to either manually finish the swap, cancel the swap, 
+// or wait until the final tx is executed by provider.
+// Swap objects are returned by SwapClient.signSwap method after client
+// sends signature shares to provider.
 export class Swap {
     constructor(
         private finalTx: zksync.types.Transfer,
@@ -13,24 +21,31 @@ export class Swap {
         private provider: zksync.Provider
     ) {}
 
+    // Send the transaction to receive the bought token from the multisig.
+    // Only use this when you know that provider has deposited funds, but not completed the swap.
     async finalize() {
         const handle = await zksync.wallet.submitSignedTransaction({ tx: this.finalTx }, this.provider);
         await handle.awaitReceipt();
         return handle.txHash;
     }
 
+    // Send the transaction that cancels the swap and returns funds deposited to the multisig.
+    // This will only work after the timeout (set in SwapData) has been reached.
     async cancel() {
         const handle = await zksync.wallet.submitSignedTransaction({ tx: this.cancelTx }, this.provider);
         await handle.awaitReceipt();
         return handle.txHash;
     }
 
+    // Wait for provider to deposit the funds and complete the swap.
     async wait() {
         await this.provider.notifyTransaction(this.finalHash, 'COMMIT');
         return this.finalHash;
     }
 }
 
+// SwapClient class provides all necessary methods to prepare, sign and complete the swap.
+// This is the main class to be used on the client side.
 export class SwapClient {
     private signer: MusigSigner;
     private commitments: Uint8Array[];
@@ -40,13 +55,7 @@ export class SwapClient {
     private transactions: any[];
     constructor(private privateKey: string, private publicKey: string, private syncWallet: zksync.Wallet) {}
 
-    static async init(privateKey: string, network: Network) {
-        const ethProvider =
-            network == 'localhost'
-                ? new ethers.providers.JsonRpcProvider('http://localhost:8545')
-                : ethers.getDefaultProvider(network);
-
-        const syncProvider = await zksync.getDefaultProvider(network, 'HTTP');
+    static async init(privateKey: string, ethProvider: ethers.providers.Provider, syncProvider: zksync.Provider) {
         const ethWallet = new ethers.Wallet(privateKey).connect(ethProvider);
         const syncWallet = await zksync.Wallet.fromEthSigner(ethWallet, syncProvider);
         const { privkey, pubkey } = await getSyncKeys(ethWallet);
@@ -68,7 +77,7 @@ export class SwapClient {
         providerPrecommitments: Uint8Array[]
     ) {
         this.swapData = data;
-        this.signer = new MusigSigner([providerPubkey, this.publicKey], 1, 5);
+        this.signer = new MusigSigner([providerPubkey, this.publicKey], CLIENT_NUMBER, TOTAL_TRANSACTIONS);
         const precommitments = this.signer.computePrecommitments();
         this.commitments = this.signer.receivePrecommitments(transpose([providerPrecommitments, precommitments]));
         this.pubKeyHash = pubKeyHash(this.signer.computePubkey());
@@ -106,8 +115,8 @@ export class SwapClient {
         let signatures = [];
         let shares = [];
 
-        for (let i = 0; i < 5; i++) {
-            const bytes = getSignBytes(this.transactions[i], this.syncWallet.signer);
+        this.transactions.forEach((tx, i) => {
+            const bytes = getSignBytes(tx, this.syncWallet.signer);
             const share = this.signer.sign(this.privateKey, bytes, i);
             const signature = this.signer.receiveSignatureShares([data.shares[i], share], i);
             shares.push(share);
@@ -118,9 +127,7 @@ export class SwapClient {
                 pubKey: utils.hexlify(this.signer.computePubkey()).substr(2),
                 signature: utils.hexlify(signature).substr(2)
             });
-        }
 
-        this.transactions.forEach((tx, i) => {
             tx.signature = signatures[i];
             tx.feeToken = tx.feeTokenId;
             tx.token = tx.tokenId;

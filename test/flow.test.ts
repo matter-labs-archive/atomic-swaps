@@ -2,7 +2,7 @@ import { expect } from 'chai';
 import { SwapProvider } from '../src/provider';
 import { SwapClient } from '../src/client';
 import { SwapData } from '../src/types';
-import { ethers, utils, BigNumber } from 'ethers';
+import { ethers, utils } from 'ethers';
 import * as zksync from 'zksync';
 import fs from 'fs';
 
@@ -39,8 +39,8 @@ describe('Test suite', () => {
             syncProvider
         );
 
-        client = await SwapClient.init(clientWallet.privateKey, 'localhost');
-        provider = await SwapProvider.init(providerWallet.privateKey, 'localhost');
+        client = await SwapClient.init(clientWallet.privateKey, ethProvider, syncProvider);
+        provider = await SwapProvider.init(providerWallet.privateKey, ethProvider, syncProvider);
 
         const depositETH = await richWallet.depositToSyncFromEthereum({
             depositTo: clientWallet.address,

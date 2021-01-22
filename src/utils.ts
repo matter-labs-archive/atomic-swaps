@@ -3,6 +3,8 @@ import * as zksync from 'zksync';
 import { private_key_to_pubkey, privateKeyFromSeed } from 'zksync-crypto';
 import { SwapData } from './types';
 
+export const TOTAL_TRANSACTIONS = 5;
+
 export function transpose<T>(matrix: T[][]): T[][] {
     return matrix[0].map((_, index) => matrix.map((row) => row[index]));
 }
