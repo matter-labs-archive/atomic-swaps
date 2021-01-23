@@ -18,6 +18,11 @@ import {
     SYNC_TX_PREFIX
 } from './utils';
 
+enum State {
+    empty,
+    prepared
+}
+
 /**
  * Swap objects are used to either manually finish the swap, cancel the swap,
  * or wait until the final tx is executed by provider.
@@ -69,7 +74,10 @@ export class SwapClient {
     private swapAddress: string;
     private pubKeyHash: Uint8Array;
     private transactions: any[];
-    private constructor(private privateKey: string, private publicKey: string, private syncWallet: zksync.Wallet) {}
+    private state: State;
+    private constructor(private privateKey: string, private publicKey: string, private syncWallet: zksync.Wallet) {
+        this.state = State.empty;
+    }
 
     /** SwapClient's async constructor */
     static async init(privateKey: string, ethProvider: ethers.providers.Provider, syncProvider: zksync.Provider) {
@@ -99,6 +107,9 @@ export class SwapClient {
         providerAddress: string,
         providerPrecommitments: Uint8Array[]
     ) {
+        if (this.state != State.empty) {
+            throw new Error("SwapClient is in the middle of a swap - can't start a new one");
+        }
         this.swapData = data;
         this.signer = new MusigSigner([providerPubkey, this.publicKey], CLIENT_MUSIG_POSITION, TOTAL_TRANSACTIONS);
         const precommitments = this.signer.computePrecommitments();
@@ -132,6 +143,7 @@ export class SwapClient {
             this.pubKeyHash,
             this.syncWallet.provider
         );
+        this.state = State.prepared;
         return {
             precommitments,
             commitments: this.commitments
@@ -146,6 +158,9 @@ export class SwapClient {
      * @returns signature shares to send to the provider and a [[Swap]] object with necessary data to finish or cancel the swap
      */
     async signSwap(data: { commitments: Uint8Array[]; shares: Uint8Array[] }) {
+        if (this.state != State.prepared) {
+            throw new Error('SwapClient is not prepared for the swap');
+        }
         this.signer.receiveCommitments(transpose([data.commitments, this.commitments]));
         const musigPubkey = this.signer.computePubkey();
         let shares = [];
@@ -180,6 +195,7 @@ export class SwapClient {
             finalHash.replace('0x', SYNC_TX_PREFIX),
             this.syncWallet.provider
         );
+        this.state = State.empty;
         return { swap, shares };
     }
 }
