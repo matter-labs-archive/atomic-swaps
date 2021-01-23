@@ -1,0 +1,10 @@
+{
+    "entryPoints": [
+        "./src/index.ts"
+    ],
+    "out": "docs",
+    "theme": "minimal",
+    "excludePrivate": true,
+    "name": "Atomic Swap SDK",
+    "hideGenerator": true
+}
