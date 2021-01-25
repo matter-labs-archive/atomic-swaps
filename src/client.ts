@@ -14,6 +14,7 @@ import {
     getSignBytes,
     getTransactions,
     formatTx,
+    isSigningKeySet,
     TOTAL_TRANSACTIONS,
     SYNC_TX_PREFIX
 } from './utils';
@@ -30,6 +31,7 @@ enum State {
  */
 export class Swap {
     constructor(
+        private changePubKeyTx: zksync.types.ChangePubKey,
         private finalTx: zksync.types.Transfer,
         private cancelTx: zksync.types.Transfer,
         private finalHash: string,
@@ -41,6 +43,10 @@ export class Swap {
      * Only use this when you know that provider has deposited funds, but not completed the swap.
      */
     async finalize() {
+        if (!(await isSigningKeySet(this.finalTx.from, this.provider))) {
+            const handle = await zksync.wallet.submitSignedTransaction({ tx: this.changePubKeyTx }, this.provider);
+            await handle.awaitReceipt();
+        }
         const handle = await zksync.wallet.submitSignedTransaction({ tx: this.finalTx }, this.provider);
         await handle.awaitReceipt();
         return handle.txHash;
@@ -51,6 +57,10 @@ export class Swap {
      * This will only work after the timeout (set in [[SwapData]]) has been reached.
      */
     async cancel() {
+        if (!(await isSigningKeySet(this.cancelTx.from, this.provider))) {
+            const handle = await zksync.wallet.submitSignedTransaction({ tx: this.changePubKeyTx }, this.provider);
+            await handle.awaitReceipt();
+        }
         const handle = await zksync.wallet.submitSignedTransaction({ tx: this.cancelTx }, this.provider);
         await handle.awaitReceipt();
         return handle.txHash;
@@ -189,13 +199,18 @@ export class SwapClient {
 
         // calculate the hash of the transaction that finalizes the swap
         const finalHash = utils.sha256(getSignBytes(this.transactions[1], this.syncWallet.signer));
+
         const swap = new Swap(
+            this.transactions[0],
             this.transactions[1],
             this.transactions[3],
             finalHash.replace('0x', SYNC_TX_PREFIX),
             this.syncWallet.provider
         );
-        this.state = State.empty;
         return { swap, shares };
+    }
+
+    reset() {
+        this.state = State.empty;
     }
 }

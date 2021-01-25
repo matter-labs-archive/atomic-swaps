@@ -6,6 +6,7 @@ import { SwapData } from './types';
 export const TOTAL_TRANSACTIONS = 5;
 export const SYNC_PREFIX = 'sync:';
 export const SYNC_TX_PREFIX = 'sync-tx:';
+const DEFAULT_PUBKEY_HASH = 'sync:0000000000000000000000000000000000000000';
 
 export function transpose<T>(matrix: T[][]): T[][] {
     return matrix[0].map((_, index) => matrix.map((row) => row[index]));
@@ -29,6 +30,11 @@ export async function getSyncKeys(ethWallet: ethers.Wallet) {
     return { privkey, pubkey };
 }
 
+export async function isSigningKeySet(address: zksync.types.Address, provider: zksync.Provider) {
+    const account = await provider.getState(address);
+    return account.committed.pubKeyHash != DEFAULT_PUBKEY_HASH;
+}
+
 export function getSignBytes(transaction: any, signer: zksync.Signer): Uint8Array {
     if (transaction.type == 'Transfer') {
         return signer.transferSignBytes(transaction, 'contracts-4');
@@ -47,6 +53,9 @@ export function formatTx(tx: any, signature: Uint8Array, pubkey: Uint8Array) {
         signature: utils.hexlify(signature).substr(2)
     };
     tx.fee = ethers.BigNumber.from(tx.fee).toString();
+    if ('ethAddress' in tx) {
+        tx.to = tx.ethAddress;
+    }
     if ('feeTokenId' in tx) {
         tx.feeToken = tx.feeTokenId;
     }

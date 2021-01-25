@@ -8,7 +8,15 @@ import { pubKeyHash } from 'zksync-crypto';
 import { ethers, utils } from 'ethers';
 import { MusigSigner } from './signer';
 import { SwapData, SchnorrData } from './types';
-import { transpose, getSyncKeys, getSignBytes, getTransactions, formatTx, TOTAL_TRANSACTIONS } from './utils';
+import {
+    transpose,
+    getSyncKeys,
+    getSignBytes,
+    getTransactions,
+    formatTx,
+    isSigningKeySet,
+    TOTAL_TRANSACTIONS
+} from './utils';
 
 enum State {
     empty,
@@ -156,10 +164,20 @@ export class SwapProvider {
         if (this.state != State.deposited) {
             throw new Error("SwapProvider has not yet deposited funds - can't finalize swap");
         }
-        for (const tx of this.transactions.slice(0, 3)) {
+        if (!(await isSigningKeySet(this.swapAddress, this.syncWallet.provider))) {
+            const handle = await zksync.wallet.submitSignedTransaction(
+                { tx: this.transactions[0] },
+                this.syncWallet.provider
+            );
+            await handle.awaitReceipt();
+        }
+        for (const tx of this.transactions.slice(1, 3)) {
             const handle = await zksync.wallet.submitSignedTransaction({ tx }, this.syncWallet.provider);
             await handle.awaitReceipt();
         }
+    }
+
+    reset() {
         this.state = State.empty;
     }
 }
