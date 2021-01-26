@@ -15,6 +15,7 @@ export interface SwapData {
     create2: {
         salt: string;
         hash: string;
+        creator: string;
     };
 }
 

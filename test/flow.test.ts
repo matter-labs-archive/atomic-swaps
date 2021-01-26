@@ -9,7 +9,7 @@ import fs from 'fs';
 
 const RICH_PRIVATE_KEY = '0x7726827caac94a7f9e1b160f7ea819f172f7b6f9d2a97f992c38edeab82d4110';
 
-describe('Test suite', () => {
+describe('Tests', () => {
     let client: SwapClient;
     let provider: SwapProvider;
     let ethProvider: ethers.providers.Provider;
@@ -29,6 +29,8 @@ describe('Test suite', () => {
         // L2 is transfer, L1 is withdraw
         withdrawType: 'L2',
         create2: {
+            // address of the factory contract that will deploy the escrow contract using create2
+            creator: utils.hexlify(crypto.randomFillSync(new Uint8Array(20))),
             salt: null,
             hash: utils.keccak256('0x' + fs.readFileSync('build/rescuer_sol_Rescuer.bin').toString())
         }
@@ -80,8 +82,7 @@ describe('Test suite', () => {
     });
 
     beforeEach('Change CREATE2 salt', () => {
-        const seed = crypto.randomFillSync(new Uint8Array(4));
-        swapData.create2.salt = utils.keccak256(seed);
+        swapData.create2.salt = utils.hexlify(crypto.randomFillSync(new Uint8Array(32)));
         client.reset();
         provider.reset();
     });
@@ -122,5 +123,14 @@ describe('Test suite', () => {
         const _swap = await exchangeSwapInfo(client, provider);
         await provider.depositFunds();
         await provider.finalizeSwap();
+    });
+
+    it('should cancel an atomic swap', async () => {
+        swapData.timeout = Math.floor(Date.now() / 1000);
+        const swap = await exchangeSwapInfo(client, provider);
+        await swap.cancel();
+
+        const clientBalance = (await syncProvider.getState(client.address())).committed.balances;
+        expect(clientBalance.DAI).to.eq(utils.parseUnits('3000.0', 18).toString());
     });
 });

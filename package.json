@@ -24,7 +24,7 @@
     "scripts": {
         "build": "tsc -b && solcjs --bin -o build rescuer.sol",
         "doc": "typedoc",
-        "test": "mocha --no-timeout --no-color -r ts-node/register test/*.test.ts",
+        "test": "mocha --no-timeout --no-color --bail -r ts-node/register test/*.test.ts",
         "fmt": "prettier --write {src,test}/*.ts"
     },
     "prettier": {

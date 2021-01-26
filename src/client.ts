@@ -126,7 +126,7 @@ export class SwapClient {
         this.commitments = this.signer.receivePrecommitments(transpose([providerPrecommitments, precommitments]));
         this.pubKeyHash = pubKeyHash(this.signer.computePubkey());
         this.swapAddress = zksync.utils.getCREATE2AddressAndSalt(utils.hexlify(this.pubKeyHash), {
-            creatorAddress: this.address(),
+            creatorAddress: data.create2.creator,
             saltArg: data.create2.salt,
             codeHash: data.create2.hash
         }).address;

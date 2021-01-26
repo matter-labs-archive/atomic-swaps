@@ -72,7 +72,7 @@ export class SwapProvider {
         this.clientAddress = clientAddress;
         this.pubKeyHash = pubKeyHash(this.signer.computePubkey());
         this.swapAddress = zksync.utils.getCREATE2AddressAndSalt(utils.hexlify(this.pubKeyHash), {
-            creatorAddress: this.clientAddress,
+            creatorAddress: data.create2.creator,
             saltArg: data.create2.salt,
             codeHash: data.create2.hash
         }).address;

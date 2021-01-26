@@ -103,6 +103,7 @@ export async function getTransactions(
     }
     const buyTokenId = syncProvider.tokenSet.resolveTokenId(swapData.buy.token);
     const sellTokenId = syncProvider.tokenSet.resolveTokenId(swapData.sell.token);
+    const nonce = swapAccount.committed.nonce;
 
     // prettier-ignore
     return [
@@ -111,14 +112,14 @@ export async function getTransactions(
         accountId: swapAccount.id,
         account: swapAccount.address,
         newPkHash: utils.hexlify(pubKeyHash).replace('0x', SYNC_PREFIX),
-        nonce: 0,
+        nonce,
         feeTokenId: sellTokenId,
         fee: fees.changePubKey,
         validFrom: 0,
         validUntil: zksync.utils.MAX_TIMESTAMP,
         ethAuthData: {
             type: 'CREATE2',
-            creatorAddress: clientAddress,
+            creatorAddress: swapData.create2.creator,
             saltArg: swapData.create2.salt,
             codeHash: swapData.create2.hash
         }
@@ -133,7 +134,7 @@ export async function getTransactions(
         amount: swapData.buy.amount,
         fee: fees.transferBought,
         feeTokenId: buyTokenId,
-        nonce: 1,
+        nonce: nonce + 1,
         validFrom: 0,
         validUntil: swapData.timeout
     },
@@ -147,7 +148,7 @@ export async function getTransactions(
         amount: swapData.sell.amount,
         fee: fees.withdraw,
         feeTokenId: sellTokenId,
-        nonce: 2,
+        nonce: nonce + 2,
         validFrom: 0,
         validUntil: zksync.utils.MAX_TIMESTAMP
     } : {
@@ -159,7 +160,7 @@ export async function getTransactions(
         amount: swapData.sell.amount,
         fee: fees.transferSold,
         feeTokenId: sellTokenId,
-        nonce: 2,
+        nonce: nonce + 2,
         validFrom: 0,
         validUntil: zksync.utils.MAX_TIMESTAMP
     },
@@ -173,7 +174,7 @@ export async function getTransactions(
         amount: swapData.sell.amount,
         fee: fees.transferSold,
         feeTokenId: sellTokenId,
-        nonce: 1,
+        nonce: nonce + 1,
         validFrom: swapData.timeout + 1,
         validUntil: zksync.utils.MAX_TIMESTAMP
     },
@@ -187,7 +188,7 @@ export async function getTransactions(
         amount: 0,
         fee: fees.transferBought,
         feeTokenId: buyTokenId,
-        nonce: 2,
+        nonce: nonce + 2,
         validFrom: swapData.timeout + 1,
         validUntil: zksync.utils.MAX_TIMESTAMP
     }];
