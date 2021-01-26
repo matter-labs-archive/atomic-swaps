@@ -2,7 +2,7 @@ import { expect } from 'chai';
 import { SwapProvider } from '../src/provider';
 import { SwapClient } from '../src/client';
 import { SwapData } from '../src/types';
-import { ethers, utils } from 'ethers';
+import { ethers, utils, BigNumber } from 'ethers';
 import * as zksync from 'zksync';
 import * as crypto from 'crypto';
 import fs from 'fs';
@@ -123,14 +123,19 @@ describe('Tests', () => {
         const _swap = await exchangeSwapInfo(client, provider);
         await provider.depositFunds();
         await provider.finalizeSwap();
+        const clientBalance = (await syncProvider.getState(client.address())).committed.balances;
+        expect(clientBalance.DAI).to.eq(utils.parseUnits('3000.0', 18).toString());
     });
 
     it('should cancel an atomic swap', async () => {
+        const clientBalance = (await syncProvider.getState(client.address())).committed.balances;
+
         swapData.timeout = Math.floor(Date.now() / 1000);
         const swap = await exchangeSwapInfo(client, provider);
         await swap.cancel();
 
-        const clientBalance = (await syncProvider.getState(client.address())).committed.balances;
-        expect(clientBalance.DAI).to.eq(utils.parseUnits('3000.0', 18).toString());
+        const newClientBalance = (await syncProvider.getState(client.address())).committed.balances;
+        const difference = BigNumber.from(clientBalance.ETH).sub(newClientBalance.ETH);
+        expect(difference.lt(utils.parseEther('0.1'))).to.be.true;
     });
 });
