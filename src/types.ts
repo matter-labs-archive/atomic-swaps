@@ -11,7 +11,7 @@ export interface SwapData {
         amount: BigNumber;
     };
     timeout: number;
-    withdrawType: 'L1' | 'L2';
+    withdrawType: TxType;
     create2: {
         salt: string;
         hash: string;
@@ -23,3 +23,5 @@ export interface SchnorrData {
     precommitments?: Uint8Array[];
     commitments?: Uint8Array[];
 }
+
+export type TxType = 'L1' | 'L2';

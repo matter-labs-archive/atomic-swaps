@@ -7,7 +7,7 @@ import * as zksync from 'zksync';
 import { pubKeyHash } from 'zksync-crypto';
 import { ethers, utils } from 'ethers';
 import { MusigSigner } from './signer';
-import { SwapData, SchnorrData } from './types';
+import { SwapData, SchnorrData, TxType } from './types';
 import {
     transpose,
     getSyncKeys,
@@ -23,7 +23,8 @@ enum State {
     prepared,
     signed,
     checked,
-    deposited
+    deposited,
+    finalized
 }
 
 // This is the provider's position in schnorr-musig protocol
@@ -145,18 +146,29 @@ export class SwapProvider {
     }
 
     /** Deposits provider's funds to the multisig account */
-    async depositFunds() {
+    async depositFunds(depositType: TxType, approveDeposit: boolean = true) {
         if (this.state != State.checked) {
             throw new Error("SwapProvider has not yet checked the signatures - can't deposit funds");
         }
-        const handle = await this.syncWallet.syncTransfer({
-            to: this.swapAddress,
-            amount: this.swapData.buy.amount.add(this.transactions[1].fee),
-            token: this.swapData.buy.token
-        });
-        await handle.awaitReceipt();
+        const amount = this.swapData.buy.amount.add(this.transactions[1].fee);
+        const token = this.swapData.buy.token;
+        let hash: string;
+        if (depositType == 'L2') {
+            const handle = await this.syncWallet.syncTransfer({ to: this.swapAddress, amount, token });
+            await handle.awaitReceipt();
+            hash = handle.txHash;
+        } else {
+            const handle = await this.syncWallet.depositToSyncFromEthereum({
+                depositTo: this.swapAddress,
+                amount,
+                token,
+                approveDepositAmountForERC20: approveDeposit
+            });
+            await handle.awaitReceipt();
+            hash = handle.ethTx.hash;
+        }
         this.state = State.deposited;
-        return handle.txHash;
+        return hash;
     }
 
     /** Sends 3 transactions that will finalize the swap */
@@ -175,6 +187,7 @@ export class SwapProvider {
             const handle = await zksync.wallet.submitSignedTransaction({ tx }, this.syncWallet.provider);
             await handle.awaitReceipt();
         }
+        this.state = State.finalized;
     }
 
     reset() {

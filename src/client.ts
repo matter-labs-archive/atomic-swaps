@@ -7,7 +7,7 @@ import * as zksync from 'zksync';
 import { pubKeyHash } from 'zksync-crypto';
 import { ethers, utils } from 'ethers';
 import { MusigSigner } from './signer';
-import { SwapData } from './types';
+import { SwapData, TxType } from './types';
 import {
     transpose,
     getSyncKeys,
@@ -21,7 +21,9 @@ import {
 
 enum State {
     empty,
-    prepared
+    prepared,
+    signed,
+    deposited
 }
 
 /**
@@ -189,14 +191,6 @@ export class SwapClient {
             formatTx(tx, signature, musigPubkey);
         });
 
-        // deposit funds to the multisig
-        const transfer = await this.syncWallet.syncTransfer({
-            to: this.swapAddress,
-            amount: this.swapData.sell.amount.add(this.transactions[0].fee).add(this.transactions[2].fee),
-            token: this.swapData.sell.token
-        });
-        await transfer.awaitReceipt();
-
         // calculate the hash of the transaction that finalizes the swap
         const finalHash = utils.sha256(getSignBytes(this.transactions[1], this.syncWallet.signer));
 
@@ -207,7 +201,34 @@ export class SwapClient {
             finalHash.replace('0x', SYNC_TX_PREFIX),
             this.syncWallet.provider
         );
+
+        this.state = State.signed;
         return { swap, shares };
+    }
+
+    async depositFunds(depositType: TxType, approveDeposit: boolean = true) {
+        if (this.state != State.signed) {
+            throw new Error("SwapClient has not yet signed the transactions - can't deposit funds");
+        }
+        const amount = this.swapData.sell.amount.add(this.transactions[0].fee).add(this.transactions[2].fee);
+        const token = this.swapData.sell.token;
+        let hash: string;
+        if (depositType == 'L2') {
+            const handle = await this.syncWallet.syncTransfer({ to: this.swapAddress, amount, token });
+            await handle.awaitReceipt();
+            hash = handle.txHash;
+        } else {
+            const handle = await this.syncWallet.depositToSyncFromEthereum({
+                depositTo: this.swapAddress,
+                amount,
+                token,
+                approveDepositAmountForERC20: approveDeposit
+            });
+            await handle.awaitReceipt();
+            hash = handle.ethTx.hash;
+        }
+        this.state = State.deposited;
+        return hash;
     }
 
     reset() {

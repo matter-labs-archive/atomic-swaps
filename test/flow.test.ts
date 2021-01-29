@@ -54,6 +54,11 @@ describe('Tests', () => {
         return ethWallet.privateKey;
     }
 
+    async function getBalance(address: string, token: zksync.types.TokenLike) {
+        const state = await syncProvider.getState(address);
+        return BigNumber.from(state.committed.balances[token] || '0');
+    }
+
     async function exchangeSwapInfo(client: SwapClient, provider: SwapProvider) {
         const response = await provider.prepareSwap(swapData, client.pubkey(), client.address());
         console.log('    provider prepared for the swap');
@@ -63,6 +68,8 @@ describe('Tests', () => {
         console.log('    provider signed transactions');
         const { swap, shares } = await client.signSwap(txs);
         console.log('    client signed transactions');
+        await client.depositFunds('L2');
+        console.log('    client deposited funds');
         await provider.checkSwap(shares);
         console.log('    provider checked swap validity');
         return swap;
@@ -88,43 +95,46 @@ describe('Tests', () => {
     });
 
     it('should perform atomic swap, finalized by provider', async () => {
-        const providerBalance = (await syncProvider.getState(provider.address())).committed.balances;
-        const clientBalance = (await syncProvider.getState(client.address())).committed.balances;
-        expect(providerBalance.ETH).to.not.exist;
-        expect(clientBalance.DAI).to.not.exist;
+        const providerBalance = await getBalance(provider.address(), 'ETH');
+        const clientBalance = await getBalance(client.address(), 'DAI');
 
         const swap = await exchangeSwapInfo(client, provider);
         await Promise.all([
             swap.wait(),
             (async () => {
                 await new Promise((r) => setTimeout(r, 3000));
-                await provider.depositFunds();
+                await provider.depositFunds('L2');
                 await provider.finalizeSwap();
             })()
         ]);
 
-        const newProviderBalance = (await syncProvider.getState(provider.address())).committed.balances;
-        const newClientBalance = (await syncProvider.getState(client.address())).committed.balances;
-        expect(newProviderBalance.ETH).to.eq(utils.parseEther('1.0').toString());
-        expect(newClientBalance.DAI).to.eq(utils.parseUnits('1000.0', 18).toString());
+        const newProviderBalance = await getBalance(provider.address(), 'ETH');
+        const newClientBalance = await getBalance(client.address(), 'DAI');
+        expect(newProviderBalance.sub(providerBalance).eq(utils.parseEther('1.0'))).to.be.true;
+        expect(newClientBalance.sub(clientBalance).eq(utils.parseUnits('1000.0', 18))).to.be.true;
     });
 
     it('should perform atomic swap, finalized by client', async () => {
+        const clientBalance = await getBalance(client.address(), 'DAI');
+
         const swap = await exchangeSwapInfo(client, provider);
-        await provider.depositFunds();
+        await provider.depositFunds('L2');
         await swap.finalize();
 
-        const clientBalance = (await syncProvider.getState(client.address())).committed.balances;
-        expect(clientBalance.DAI).to.eq(utils.parseUnits('2000.0', 18).toString());
+        const newClientBalance = await getBalance(client.address(), 'DAI');
+        expect(newClientBalance.sub(clientBalance).eq(utils.parseUnits('1000.0', 18))).to.be.true;
     });
 
     it('should perform atomic swap, withdraw to L1', async () => {
+        const clientBalance = await getBalance(client.address(), 'DAI');
+
         swapData.withdrawType = 'L1';
-        const _swap = await exchangeSwapInfo(client, provider);
-        await provider.depositFunds();
+        await exchangeSwapInfo(client, provider);
+        await provider.depositFunds('L2');
         await provider.finalizeSwap();
-        const clientBalance = (await syncProvider.getState(client.address())).committed.balances;
-        expect(clientBalance.DAI).to.eq(utils.parseUnits('3000.0', 18).toString());
+
+        const newClientBalance = await getBalance(client.address(), 'DAI');
+        expect(newClientBalance.sub(clientBalance).eq(utils.parseUnits('1000.0', 18))).to.be.true;
     });
 
     it('should cancel an atomic swap', async () => {

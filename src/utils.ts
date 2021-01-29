@@ -185,7 +185,7 @@ export async function getTransactions(
         accountId: swapAccount.id,
         from: swapAccount.address,
         to: providerAddress,
-        amount: 0,
+        amount: swapData.buy.amount,
         fee: fees.transferBought,
         feeTokenId: buyTokenId,
         nonce: nonce + 2,
