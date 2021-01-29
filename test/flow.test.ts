@@ -8,6 +8,7 @@ import * as crypto from 'crypto';
 import fs from 'fs';
 
 const RICH_PRIVATE_KEY = '0x7726827caac94a7f9e1b160f7ea819f172f7b6f9d2a97f992c38edeab82d4110';
+const CONTRACT = 'build/contracts_Rescuer_sol_Rescuer.bin';
 
 describe('Tests', () => {
     let client: SwapClient;
@@ -32,7 +33,7 @@ describe('Tests', () => {
             // address of the factory contract that will deploy the escrow contract using create2
             creator: utils.hexlify(crypto.randomFillSync(new Uint8Array(20))),
             salt: null,
-            hash: utils.keccak256('0x' + fs.readFileSync('build/rescuer_sol_Rescuer.bin').toString())
+            hash: null
         }
     };
 
@@ -86,6 +87,15 @@ describe('Tests', () => {
         const providerKey = await createWallet(richWallet, 'DAI', utils.parseUnits('5000.0', 18));
         client = await SwapClient.init(clientKey, ethProvider, syncProvider);
         provider = await SwapProvider.init(providerKey, ethProvider, syncProvider);
+
+        const bytecode = fs.readFileSync(CONTRACT).toString();
+        // address of the deployed DAI contract would go here
+        const daiAddress = utils.hexlify(crypto.randomBytes(20));
+        // we use zero-address if the token is ETH
+        const ethAddress = utils.hexlify(new Uint8Array(20));
+        const args = client.address() + provider.address() + ethAddress + daiAddress;
+        // compute the hash of the to-be-deployed code of escrow contract
+        swapData.create2.hash = utils.keccak256('0x' + bytecode + args.replace(/0x/g, ''));
     });
 
     beforeEach('Change CREATE2 salt', () => {
