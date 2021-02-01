@@ -32,13 +32,16 @@ contract Rescuer {
     }
 
     function withdraw(address payable recipient, address token) internal {
+        bool success;
         if (token == address(0)) {
-            recipient.transfer(address(this).balance);
+            uint256 balance = address(this).balance;
+            (success, ) = msg.sender.call{value: balance}("");
         } else {
             IERC20 erc20 = IERC20(token);
             uint256 balance = erc20.balanceOf(address(this));
-            erc20.transfer(recipient, balance);
+            success = erc20.transfer(recipient, balance);
         }
+        require(success, "Transfer failed");
     }
 
     receive() external payable {}

@@ -23,7 +23,9 @@
         "typescript": "^4.1.3"
     },
     "scripts": {
-        "build": "tsc -b && solcjs -o build --bin --optimize --base-path . contracts/Deployer.sol",
+        "build:ts": "tsc -b",
+        "build:sol": "solcjs -o build --bin --optimize --base-path . contracts/Deployer.sol",
+        "build": "yarn build:ts && yarn build:sol",
         "doc": "typedoc",
         "test": "mocha --no-timeout --no-color --bail -r ts-node/register test/*.test.ts",
         "fmt:ts": "prettier --config fmt-ts.json --write {src,test}/*.ts",
