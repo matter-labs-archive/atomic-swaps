@@ -39,7 +39,11 @@ contract Rescuer {
         } else {
             IERC20 erc20 = IERC20(token);
             uint256 balance = erc20.balanceOf(address(this));
-            success = erc20.transfer(recipient, balance);
+            (bool callSuccess, bytes memory returnedValue) =
+                token.call(abi.encodeWithSelector(erc20.transfer.selector, recipient, balance));
+            // `.transfer` may optionally return bool
+            bool returnedSuccess = returnedValue.length == 0 || abi.decode(returnedValue, (bool));
+            success = callSuccess && returnedSuccess;
         }
         require(success, "Transfer failed");
     }
