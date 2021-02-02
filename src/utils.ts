@@ -37,11 +37,11 @@ export async function isSigningKeySet(address: zksync.types.Address, provider: z
 
 export function getSignBytes(transaction: any, signer: zksync.Signer): Uint8Array {
     if (transaction.type == 'Transfer') {
-        return signer.transferSignBytes(transaction, 'contracts-4');
+        return signer.transferSignBytes(transaction);
     } else if (transaction.type == 'Withdraw') {
-        return signer.withdrawSignBytes(transaction, 'contracts-4');
+        return signer.withdrawSignBytes(transaction);
     } else if (transaction.type == 'ChangePubKey') {
-        return signer.changePubKeySignBytes(transaction, 'contracts-4');
+        return signer.changePubKeySignBytes(transaction);
     } else {
         throw new Error('Invalid transaction type');
     }
