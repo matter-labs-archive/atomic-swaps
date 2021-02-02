@@ -31,7 +31,7 @@ describe('Tests', () => {
         withdrawType: 'L2',
         create2: {
             // address of the factory contract that will deploy the escrow contract using create2
-            creator: utils.hexlify(crypto.randomFillSync(new Uint8Array(20))),
+            creator: utils.hexlify(crypto.randomBytes(20)),
             salt: null,
             hash: null
         }

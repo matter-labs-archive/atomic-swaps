@@ -35,7 +35,7 @@ contract Rescuer {
         bool success;
         if (token == address(0)) {
             uint256 balance = address(this).balance;
-            (success, ) = msg.sender.call{value: balance}("");
+            (success, ) = recipient.call{value: balance}("");
         } else {
             IERC20 erc20 = IERC20(token);
             uint256 balance = erc20.balanceOf(address(this));
