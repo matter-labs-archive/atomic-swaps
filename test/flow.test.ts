@@ -206,7 +206,22 @@ describe('Tests', () => {
 
             // wait until the deposits are verified
             await syncProvider.notifyTransaction(hash, 'VERIFY');
-            await zksync.utils.sleep(5000);
+            console.log('      transactions verified');
+
+            // enter exodus mode
+            const activate = await syncContract.activateExodusMode();
+            const tx = await activate.wait();
+            expect(tx.events[0].event).to.equal('ExodusMode');
+            console.log('      exodus mode entered');
+
+            // generate exit proof
+            const swapAccount = await syncProvider.getState(client.swapAddress());
+            const command = `zk run exit-proof --account ${swapAccount.id} --token ETH`;
+            const { stdout } = await exec(command);
+            const exitData = JSON.parse(stdout.slice(stdout.indexOf('{')));
+            console.log('      exit proof generated');
+
+            // fetch data about last verified block
             const verifyTx = await ethProvider.getTransaction(verifyTxHash);
             const blockInfoBytes = utils.arrayify(verifyTx.data);
             const blockInfo = {
@@ -217,20 +232,9 @@ describe('Tests', () => {
                 stateHash: blockInfoBytes.slice(228, 260),
                 commitment: blockInfoBytes.slice(260, 292)
             };
-            console.log('BLOCK_INFO:', blockInfo);
+            console.log('      verified block info fetched');
 
-            // enter exodus mode
-            const activate = await syncContract.activateExodusMode();
-            const tx = await activate.wait();
-            expect(tx.events[0].event).to.equal('ExodusMode');
-            console.log('EXODUS MODE ENTERED');
-
-            // generate and post exit proof
-            const swapAccount = await syncProvider.getState(client.swapAddress());
-            const command = `zk run exit-proof --account ${swapAccount.id} --token ETH`;
-            const { stdout } = await exec(command);
-            const exitData = JSON.parse(stdout.slice(stdout.indexOf('{')));
-            console.log('PROOF:', exitData);
+            // post exit proof onchain
             const exit = await syncContract.performExodus(
                 blockInfo,
                 exitData.account_address,
@@ -243,7 +247,7 @@ describe('Tests', () => {
                 }
             );
             await exit.wait();
-            console.log('EXIT PERFORMED', exit);
+            console.log('      exit performed');
 
             // withdraw funds to the escrow contract
             const withdraw = await syncContract.withdrawPendingBalance(
@@ -252,11 +256,11 @@ describe('Tests', () => {
                 exitData.amount
             );
             await withdraw.wait();
-            console.log('WITHDREW', withdraw);
 
             // verify that costs are accrued
             const balance = await ethProvider.getBalance(client.swapAddress());
-            console.log('BALANCE OF THE SWAP ADDRESS', balance.toString());
+            expect(balance.gte(utils.parseEther('1.0'))).to.be.true;
+            console.log('      funds withdrawn to the escrow contract');
 
             // deploy escrow contract
             const deploy = await deployer.deploy(
@@ -267,7 +271,7 @@ describe('Tests', () => {
                 syncProvider.tokenSet.resolveTokenAddress('DAI')
             );
             await deploy.wait();
-            console.log('ESCROW CONTRACT DEPLOYED', deploy);
+            console.log('      escrow contract deployed');
 
             const abi = ['function clientWithdraw()', 'function providerWithdraw()'];
             const rescuer = new ethers.Contract(client.swapAddress(), abi, rich);
@@ -275,10 +279,10 @@ describe('Tests', () => {
             // rescue the funds and verify that transfer is correct
             const rescue = await rescuer.clientWithdraw();
             await rescue.wait();
-            console.log('FUNDS RESCUED', rescue);
 
             const clientBalance = await ethProvider.getBalance(client.address());
-            console.log('CLIENT BALANCE', clientBalance.toString());
+            expect(clientBalance.gte(utils.parseEther('1.0'))).to.be.true;
+            console.log('      funds rescued from the escrow contract');
         });
     });
 });
