@@ -37,7 +37,10 @@ export class SwapProvider {
     private swapData: SwapData;
     private schnorrData: SchnorrData = {};
     private pubKeyHash: Uint8Array;
-    private swapAddress: string;
+    private create2Info: {
+        salt: string;
+        address: string;
+    };
     private clientAddress: string;
     private state: State;
     private constructor(private privateKey: string, private publicKey: string, private syncWallet: zksync.Wallet) {
@@ -60,6 +63,24 @@ export class SwapProvider {
         return this.publicKey;
     }
 
+    id() {
+        return this.syncWallet.getAccountId();
+    }
+
+    swapAddress() {
+        if (this.state == State.empty) {
+            throw new Error('No active swaps present');
+        }
+        return this.create2Info.address;
+    }
+
+    swapSalt() {
+        if (this.state == State.empty) {
+            throw new Error('No active swaps present');
+        }
+        return this.create2Info.salt;
+    }
+
     /**
      * Generates precommitments for the schnorr-musig protocol
      */
@@ -72,11 +93,11 @@ export class SwapProvider {
         this.swapData = data;
         this.clientAddress = clientAddress;
         this.pubKeyHash = pubKeyHash(this.signer.computePubkey());
-        this.swapAddress = zksync.utils.getCREATE2AddressAndSalt(utils.hexlify(this.pubKeyHash), {
+        this.create2Info = zksync.utils.getCREATE2AddressAndSalt(utils.hexlify(this.pubKeyHash), {
             creatorAddress: data.create2.creator,
             saltArg: data.create2.salt,
             codeHash: data.create2.hash
-        }).address;
+        });
         this.state = State.prepared;
         return {
             publicKey: this.publicKey,
@@ -101,7 +122,7 @@ export class SwapProvider {
             this.swapData,
             this.clientAddress,
             this.address(),
-            this.swapAddress,
+            this.swapAddress(),
             this.pubKeyHash,
             this.syncWallet.provider
         );
@@ -137,7 +158,7 @@ export class SwapProvider {
             }
             formatTx(tx, signature, musigPubkey);
         });
-        const swapAccountBalance = (await this.syncWallet.provider.getState(this.swapAddress)).committed.balances;
+        const swapAccountBalance = (await this.syncWallet.provider.getState(this.swapAddress())).committed.balances;
         const necessaryDeposit = this.swapData.sell.amount.add(this.transactions[0].fee).add(this.transactions[2].fee);
         if (necessaryDeposit.gt(swapAccountBalance[this.swapData.sell.token])) {
             throw new Error('Client did not deposit funds');
@@ -154,12 +175,12 @@ export class SwapProvider {
         const token = this.swapData.buy.token;
         let hash: string;
         if (depositType == 'L2') {
-            const handle = await this.syncWallet.syncTransfer({ to: this.swapAddress, amount, token });
+            const handle = await this.syncWallet.syncTransfer({ to: this.swapAddress(), amount, token });
             await handle.awaitReceipt();
             hash = handle.txHash;
         } else {
             const handle = await this.syncWallet.depositToSyncFromEthereum({
-                depositTo: this.swapAddress,
+                depositTo: this.swapAddress(),
                 amount,
                 token,
                 approveDepositAmountForERC20: approveDeposit
@@ -176,7 +197,7 @@ export class SwapProvider {
         if (this.state != State.deposited) {
             throw new Error("SwapProvider has not yet deposited funds - can't finalize swap");
         }
-        if (!(await isSigningKeySet(this.swapAddress, this.syncWallet.provider))) {
+        if (!(await isSigningKeySet(this.swapAddress(), this.syncWallet.provider))) {
             const handle = await zksync.wallet.submitSignedTransaction(
                 { tx: this.transactions[0] },
                 this.syncWallet.provider

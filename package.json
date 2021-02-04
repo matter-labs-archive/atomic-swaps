@@ -27,7 +27,7 @@
         "build:sol": "solcjs -o build --bin --optimize --base-path . contracts/Deployer.sol",
         "build": "yarn build:ts && yarn build:sol",
         "doc": "typedoc",
-        "test": "mocha --no-timeout --no-color --bail -r ts-node/register test/*.test.ts",
+        "test": "mocha --no-timeout --no-color --bail --exit -r ts-node/register test/*.test.ts",
         "fmt:ts": "prettier --config fmt-ts.json --write {src,test}/*.ts",
         "fmt:sol": "prettier --config fmt-sol.json --write contracts/*.sol",
         "fmt": "yarn fmt:ts && yarn fmt:sol"

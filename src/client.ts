@@ -83,7 +83,10 @@ export class SwapClient {
     private signer: MusigSigner;
     private commitments: Uint8Array[];
     private swapData: SwapData;
-    private swapAddress: string;
+    private create2Info: {
+        salt: string;
+        address: string;
+    };
     private pubKeyHash: Uint8Array;
     private transactions: any[];
     private state: State;
@@ -107,6 +110,24 @@ export class SwapClient {
         return this.syncWallet.address();
     }
 
+    id() {
+        return this.syncWallet.getAccountId();
+    }
+
+    swapAddress() {
+        if (this.state == State.empty) {
+            throw new Error('No active swaps present');
+        }
+        return this.create2Info.address;
+    }
+
+    swapSalt() {
+        if (this.state == State.empty) {
+            throw new Error('No active swaps present');
+        }
+        return this.create2Info.salt;
+    }
+
     /**
      * This method generates precommitments and commitments for schnorr-musig protocol,
      * makes a 0-transfer to the multisig account so that the server assigns an ID to it, and generates
@@ -127,19 +148,20 @@ export class SwapClient {
         const precommitments = this.signer.computePrecommitments();
         this.commitments = this.signer.receivePrecommitments(transpose([providerPrecommitments, precommitments]));
         this.pubKeyHash = pubKeyHash(this.signer.computePubkey());
-        this.swapAddress = zksync.utils.getCREATE2AddressAndSalt(utils.hexlify(this.pubKeyHash), {
+        this.create2Info = zksync.utils.getCREATE2AddressAndSalt(utils.hexlify(this.pubKeyHash), {
             creatorAddress: data.create2.creator,
             saltArg: data.create2.salt,
             codeHash: data.create2.hash
-        }).address;
+        });
+        this.state = State.prepared;
 
         // if the swapAccount has not yet been created (has no id)
         // we have to make a 0-transfer to it so it will be created,
         // otherwise we won't be able to sign outcoming transactions
-        const swapAccount = await this.syncWallet.provider.getState(this.swapAddress);
+        const swapAccount = await this.syncWallet.provider.getState(this.swapAddress());
         if (!swapAccount.id) {
             const tx = await this.syncWallet.syncTransfer({
-                to: this.swapAddress,
+                to: this.swapAddress(),
                 token: data.sell.token,
                 amount: 0
             });
@@ -151,11 +173,10 @@ export class SwapClient {
             this.swapData,
             this.address(),
             providerAddress,
-            this.swapAddress,
+            this.swapAddress(),
             this.pubKeyHash,
             this.syncWallet.provider
         );
-        this.state = State.prepared;
         return {
             precommitments,
             commitments: this.commitments
@@ -214,12 +235,12 @@ export class SwapClient {
         const token = this.swapData.sell.token;
         let hash: string;
         if (depositType == 'L2') {
-            const handle = await this.syncWallet.syncTransfer({ to: this.swapAddress, amount, token });
+            const handle = await this.syncWallet.syncTransfer({ to: this.swapAddress(), amount, token });
             await handle.awaitReceipt();
             hash = handle.txHash;
         } else {
             const handle = await this.syncWallet.depositToSyncFromEthereum({
-                depositTo: this.swapAddress,
+                depositTo: this.swapAddress(),
                 amount,
                 token,
                 approveDepositAmountForERC20: approveDeposit

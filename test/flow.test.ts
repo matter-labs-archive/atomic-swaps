@@ -6,15 +6,21 @@ import { ethers, utils, BigNumber } from 'ethers';
 import * as zksync from 'zksync';
 import * as crypto from 'crypto';
 import fs from 'fs';
+import { exec as _exec } from 'child_process';
+import { promisify } from 'util';
 
+const exec = promisify(_exec);
 const RICH_PRIVATE_KEY = '0x7726827caac94a7f9e1b160f7ea819f172f7b6f9d2a97f992c38edeab82d4110';
-const CONTRACT = 'build/contracts_Rescuer_sol_Rescuer.bin';
+const RESCUER_CONTRACT = 'build/contracts_Rescuer_sol_Rescuer.bin';
+const DEPLOYER_CONTRACT = 'build/contracts_Deployer_sol_Deployer.bin';
 
 describe('Tests', () => {
     let client: SwapClient;
     let provider: SwapProvider;
+    let rich: ethers.Wallet;
     let ethProvider: ethers.providers.Provider;
     let syncProvider: zksync.Provider;
+    let deployer: ethers.Contract;
 
     const swapData: SwapData = {
         sell: {
@@ -30,8 +36,7 @@ describe('Tests', () => {
         // L2 is transfer, L1 is withdraw
         withdrawType: 'L2',
         create2: {
-            // address of the factory contract that will deploy the escrow contract using create2
-            creator: utils.hexlify(crypto.randomBytes(20)),
+            creator: null,
             salt: null,
             hash: null
         }
@@ -60,7 +65,7 @@ describe('Tests', () => {
         return BigNumber.from(state.committed.balances[token] || '0');
     }
 
-    async function exchangeSwapInfo(client: SwapClient, provider: SwapProvider) {
+    async function exchangeSwapInfo(client: SwapClient, provider: SwapProvider, verify: boolean = false) {
         const response = await provider.prepareSwap(swapData, client.pubkey(), client.address());
         console.log('    provider prepared for the swap');
         const data = await client.prepareSwap(swapData, response.publicKey, response.address, response.precommitments);
@@ -69,33 +74,48 @@ describe('Tests', () => {
         console.log('    provider signed transactions');
         const { swap, shares } = await client.signSwap(txs);
         console.log('    client signed transactions');
-        await client.depositFunds('L2');
+        const hash = await client.depositFunds('L2');
         console.log('    client deposited funds');
         await provider.checkSwap(shares);
         console.log('    provider checked swap validity');
+        if (verify) {
+            await syncProvider.notifyTransaction(hash, 'VERIFY');
+        }
         return swap;
     }
 
     before('Init client and provider', async () => {
+        // connect to providers
         ethProvider = new ethers.providers.JsonRpcProvider();
         syncProvider = await zksync.getDefaultProvider('localhost', 'HTTP');
-        const richWallet = await zksync.Wallet.fromEthSigner(
-            new ethers.Wallet(RICH_PRIVATE_KEY).connect(ethProvider),
-            syncProvider
-        );
-        const clientKey = await createWallet(richWallet, 'ETH', utils.parseEther('5.0'));
-        const providerKey = await createWallet(richWallet, 'DAI', utils.parseUnits('5000.0', 18));
+
+        // create helper wallets, client and provider
+        rich = new ethers.Wallet(RICH_PRIVATE_KEY).connect(ethProvider);
+        const richWallet = await zksync.Wallet.fromEthSigner(rich, syncProvider);
+        const clientKey = await createWallet(richWallet, 'ETH', utils.parseEther('50.0'));
+        const providerKey = await createWallet(richWallet, 'DAI', utils.parseUnits('50000.0', 18));
         client = await SwapClient.init(clientKey, ethProvider, syncProvider);
         provider = await SwapProvider.init(providerKey, ethProvider, syncProvider);
 
-        const bytecode = fs.readFileSync(CONTRACT).toString();
-        // address of the deployed DAI contract would go here
-        const daiAddress = utils.hexlify(crypto.randomBytes(20));
+        // extract CREATE2 data
+        const rescuerBytecode = '0x' + fs.readFileSync(RESCUER_CONTRACT).toString();
+        // FIXME address of the deployed DAI contract would go here
+        const daiAddress = syncProvider.tokenSet.resolveTokenAddress('DAI');
         // we use zero-address if the token is ETH
-        const ethAddress = utils.hexlify(new Uint8Array(20));
-        const args = client.address() + provider.address() + ethAddress + daiAddress;
+        const ethAddress = syncProvider.tokenSet.resolveTokenAddress('ETH');
+        const args = [client.address(), provider.address(), ethAddress, daiAddress].map((address) =>
+            utils.hexlify(utils.zeroPad(address, 32))
+        );
         // compute the hash of the to-be-deployed code of escrow contract
-        swapData.create2.hash = utils.keccak256('0x' + bytecode + args.replace(/0x/g, ''));
+        swapData.create2.hash = utils.keccak256(rescuerBytecode + args.join('').replace(/0x/g, ''));
+
+        // deploy the factory contract
+        const abi = ['function deploy(bytes32, address, address, address, address)'];
+        const deployerBytecode = '0x' + fs.readFileSync(DEPLOYER_CONTRACT).toString();
+        const factory = new ethers.ContractFactory(abi, deployerBytecode, rich);
+        deployer = await factory.deploy();
+        await deployer.deployed();
+        swapData.create2.creator = deployer.address;
     });
 
     beforeEach('Change CREATE2 salt', () => {
@@ -145,6 +165,8 @@ describe('Tests', () => {
 
         const newClientBalance = await getBalance(client.address(), 'DAI');
         expect(newClientBalance.sub(clientBalance).eq(utils.parseUnits('1000.0', 18))).to.be.true;
+
+        swapData.withdrawType = 'L2';
     });
 
     it('should cancel an atomic swap', async () => {
@@ -156,6 +178,107 @@ describe('Tests', () => {
 
         const newClientBalance = (await syncProvider.getState(client.address())).committed.balances;
         const difference = BigNumber.from(clientBalance.ETH).sub(newClientBalance.ETH);
+        // fees are the difference
         expect(difference.lt(utils.parseEther('0.1'))).to.be.true;
+
+        swapData.timeout = Math.floor(Date.now() / 1000) + 600;
+    });
+
+    describe('Exodus mode test', () => {
+        it('should rescue funds in case of exodus mode', async () => {
+            // zk dummy-prover enable --no-redeploy
+            // EASY_EXODUS=true zk init
+            // zk server
+            // zk dummy-prover run
+            const syncContract = new ethers.Contract(
+                syncProvider.contractAddress.mainContract,
+                zksync.utils.SYNC_MAIN_CONTRACT_INTERFACE,
+                rich
+            );
+
+            let verifyTxHash = '';
+            ethProvider.on(syncContract.filters.BlockVerification(), (event) => {
+                verifyTxHash = event.transactionHash;
+            });
+
+            await exchangeSwapInfo(client, provider, true);
+            const hash = await provider.depositFunds('L2');
+
+            // wait until the deposits are verified
+            await syncProvider.notifyTransaction(hash, 'VERIFY');
+            await zksync.utils.sleep(5000);
+            const verifyTx = await ethProvider.getTransaction(verifyTxHash);
+            const blockInfoBytes = utils.arrayify(verifyTx.data);
+            const blockInfo = {
+                blockNumber: utils.hexlify(blockInfoBytes.slice(100, 132)),
+                priorityOperations: utils.hexlify(blockInfoBytes.slice(132, 164)),
+                pendingOnchainOperationsHash: blockInfoBytes.slice(164, 196),
+                timestamp: utils.hexlify(blockInfoBytes.slice(196, 228)),
+                stateHash: blockInfoBytes.slice(228, 260),
+                commitment: blockInfoBytes.slice(260, 292)
+            };
+            console.log('BLOCK_INFO:', blockInfo);
+
+            // enter exodus mode
+            const activate = await syncContract.activateExodusMode();
+            const tx = await activate.wait();
+            expect(tx.events[0].event).to.equal('ExodusMode');
+            console.log('EXODUS MODE ENTERED');
+
+            // generate and post exit proof
+            const swapAccount = await syncProvider.getState(client.swapAddress());
+            const command = `zk run exit-proof --account ${swapAccount.id} --token ETH`;
+            const { stdout } = await exec(command);
+            const exitData = JSON.parse(stdout.slice(stdout.indexOf('{')));
+            console.log('PROOF:', exitData);
+            const exit = await syncContract.performExodus(
+                blockInfo,
+                exitData.account_address,
+                exitData.account_id,
+                exitData.token_id,
+                exitData.amount,
+                exitData.proof.proof,
+                {
+                    gasLimit: 1_000_000
+                }
+            );
+            await exit.wait();
+            console.log('EXIT PERFORMED', exit);
+
+            // withdraw funds to the escrow contract
+            const withdraw = await syncContract.withdrawPendingBalance(
+                client.swapAddress(),
+                syncProvider.tokenSet.resolveTokenAddress('ETH'),
+                exitData.amount
+            );
+            await withdraw.wait();
+            console.log('WITHDREW', withdraw);
+
+            // verify that costs are accrued
+            const balance = await ethProvider.getBalance(client.swapAddress());
+            console.log('BALANCE OF THE SWAP ADDRESS', balance.toString());
+
+            // deploy escrow contract
+            const deploy = await deployer.deploy(
+                client.swapSalt(),
+                client.address(),
+                provider.address(),
+                syncProvider.tokenSet.resolveTokenAddress('ETH'),
+                syncProvider.tokenSet.resolveTokenAddress('DAI')
+            );
+            await deploy.wait();
+            console.log('ESCROW CONTRACT DEPLOYED', deploy);
+
+            const abi = ['function clientWithdraw()', 'function providerWithdraw()'];
+            const rescuer = new ethers.Contract(client.swapAddress(), abi, rich);
+
+            // rescue the funds and verify that transfer is correct
+            const rescue = await rescuer.clientWithdraw();
+            await rescue.wait();
+            console.log('FUNDS RESCUED', rescue);
+
+            const clientBalance = await ethProvider.getBalance(client.address());
+            console.log('CLIENT BALANCE', clientBalance.toString());
+        });
     });
 });
