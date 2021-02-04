@@ -99,7 +99,7 @@ describe('Tests', () => {
 
         // extract CREATE2 data
         const rescuerBytecode = '0x' + fs.readFileSync(RESCUER_CONTRACT).toString();
-        // FIXME address of the deployed DAI contract would go here
+        // address of the deployed DAI contract goes here
         const daiAddress = syncProvider.tokenSet.resolveTokenAddress('DAI');
         // we use zero-address if the token is ETH
         const ethAddress = syncProvider.tokenSet.resolveTokenAddress('ETH');
