@@ -33,8 +33,6 @@ describe('Tests', () => {
         },
         // ten minutes since now
         timeout: Math.floor(Date.now() / 1000) + 600,
-        // L2 is transfer, L1 is withdraw
-        withdrawType: 'L2',
         create2: {
             creator: null,
             salt: null,

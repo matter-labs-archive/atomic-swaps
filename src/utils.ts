@@ -75,28 +75,6 @@ export async function getTransactions(
     pubKeyHash: Uint8Array,
     syncProvider: zksync.Provider
 ): Promise<any[]> {
-    const { totalFee: transferSold } = await syncProvider.getTransactionFee(
-        'Transfer',
-        providerAddress,
-        swapData.sell.token
-    );
-    const { totalFee: transferBought } = await syncProvider.getTransactionFee(
-        'Transfer',
-        providerAddress,
-        swapData.buy.token
-    );
-    const { totalFee: changePubKey } = await syncProvider.getTransactionFee(
-        { ChangePubKey: { onchainPubkeyAuth: false } },
-        providerAddress,
-        swapData.sell.token
-    );
-    const { totalFee: withdraw } = await syncProvider.getTransactionFee(
-        'Withdraw',
-        providerAddress,
-        swapData.sell.token
-    );
-    const fees = { transferSold, transferBought, changePubKey, withdraw };
-
     const swapAccount = await syncProvider.getState(swapAddress);
     if (!swapAccount.id) {
         throw new Error("Swap Account ID not set - can't sign transactions");
@@ -114,7 +92,7 @@ export async function getTransactions(
         newPkHash: utils.hexlify(pubKeyHash).replace('0x', SYNC_PREFIX),
         nonce,
         feeTokenId: sellTokenId,
-        fee: fees.changePubKey,
+        fee: 0,
         validFrom: 0,
         validUntil: zksync.utils.MAX_TIMESTAMP,
         ethAuthData: {
@@ -132,33 +110,21 @@ export async function getTransactions(
         from: swapAccount.address,
         to: clientAddress,
         amount: swapData.buy.amount,
-        fee: fees.transferBought,
+        fee: 0,
         feeTokenId: buyTokenId,
         nonce: nonce + 1,
         validFrom: 0,
         validUntil: swapData.timeout
     },
 
-    (swapData.withdrawType == 'L1') ? {
-        type: 'Withdraw',
-        tokenId: sellTokenId,
-        accountId: swapAccount.id,
-        from: swapAccount.address,
-        ethAddress: providerAddress,
-        amount: swapData.sell.amount,
-        fee: fees.withdraw,
-        feeTokenId: sellTokenId,
-        nonce: nonce + 2,
-        validFrom: 0,
-        validUntil: zksync.utils.MAX_TIMESTAMP
-    } : {
+    {
         type: 'Transfer',
         tokenId: sellTokenId,
         accountId: swapAccount.id,
         from: swapAccount.address,
         to: providerAddress,
         amount: swapData.sell.amount,
-        fee: fees.transferSold,
+        fee: 0,
         feeTokenId: sellTokenId,
         nonce: nonce + 2,
         validFrom: 0,
@@ -172,7 +138,7 @@ export async function getTransactions(
         from: swapAccount.address,
         to: clientAddress,
         amount: swapData.sell.amount,
-        fee: fees.transferSold,
+        fee: 0,
         feeTokenId: sellTokenId,
         nonce: nonce + 1,
         validFrom: swapData.timeout + 1,
@@ -186,7 +152,7 @@ export async function getTransactions(
         from: swapAccount.address,
         to: providerAddress,
         amount: swapData.buy.amount,
-        fee: fees.transferBought,
+        fee: 0,
         feeTokenId: buyTokenId,
         nonce: nonce + 2,
         validFrom: swapData.timeout + 1,

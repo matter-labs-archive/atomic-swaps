@@ -11,7 +11,6 @@ export interface SwapData {
         amount: BigNumber;
     };
     timeout: number;
-    withdrawType: TxType;
     create2: {
         salt: string;
         hash: string;
