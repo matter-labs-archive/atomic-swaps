@@ -91,8 +91,8 @@ describe('Tests', () => {
         const richWallet = await zksync.Wallet.fromEthSigner(rich, syncProvider);
         const clientKey = await createWallet(richWallet, 'ETH', utils.parseEther('50.0'));
         const providerKey = await createWallet(richWallet, 'DAI', utils.parseUnits('50000.0', 18));
-        client = (await SwapClient.init(clientKey, ethProvider, syncProvider)) as SwapClient;
-        provider = (await SwapProvider.init(providerKey, ethProvider, syncProvider)) as SwapProvider;
+        client = await SwapClient.init(clientKey, ethProvider, syncProvider);
+        provider = await SwapProvider.init(providerKey, ethProvider, syncProvider);
 
         // extract CREATE2 data
         const rescuerBytecode = '0x' + fs.readFileSync(RESCUER_CONTRACT).toString();

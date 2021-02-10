@@ -5,7 +5,7 @@
 
 import * as zksync from 'zksync';
 import { pubKeyHash } from 'zksync-crypto';
-import { utils } from 'ethers';
+import { providers, utils } from 'ethers';
 import { MusigSigner } from './signer';
 import { SwapData, SwapState } from './types';
 import { transpose, getTransactions, formatTx, SYNC_TX_PREFIX, TOTAL_TRANSACTIONS } from './utils';
@@ -18,6 +18,10 @@ const CLIENT_MUSIG_POSITION = 1;
 /** SwapClient class provides all necessary methods to prepare, sign and complete the swap on the client side. */
 export class SwapClient extends SwapParty {
     private commitments: Uint8Array[];
+
+    static async init(privateKey: string, ethProvider: providers.Provider, syncProvider: zksync.Provider) {
+        return (await super.init(privateKey, ethProvider, syncProvider)) as SwapClient;
+    }
 
     /**
      * This method generates precommitments and commitments for schnorr-musig protocol,
@@ -118,7 +122,6 @@ export class SwapClient extends SwapParty {
         return hash;
     }
 
-    // TODO: cancel, wait and finalize
     async wait() {
         if (this.state != SwapState.deposited) {
             throw new Error('...');
@@ -129,6 +132,9 @@ export class SwapClient extends SwapParty {
             this.syncWallet.provider.notifyTransaction(hash.replace('0x', SYNC_TX_PREFIX), 'COMMIT'),
             new Promise((resolve) => setTimeout(resolve, timeout, null))
         ]);
+        if (result) {
+            this.state = SwapState.finalized;
+        }
         return result !== null;
     }
 

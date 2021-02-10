@@ -5,7 +5,7 @@
 
 import * as zksync from 'zksync';
 import { pubKeyHash } from 'zksync-crypto';
-import { utils } from 'ethers';
+import { utils, providers } from 'ethers';
 import { MusigSigner } from './signer';
 import { SwapData, SchnorrData, SwapState } from './types';
 import { transpose, getTransactions, formatTx, TOTAL_TRANSACTIONS } from './utils';
@@ -19,6 +19,10 @@ export class SwapProvider extends SwapParty {
     private shares: Uint8Array[];
     private schnorrData: SchnorrData = {};
     private clientAddress: string;
+
+    static async init(privateKey: string, ethProvider: providers.Provider, syncProvider: zksync.Provider) {
+        return (await super.init(privateKey, ethProvider, syncProvider)) as SwapProvider;
+    }
 
     /**
      * Generates precommitments for the schnorr-musig protocol

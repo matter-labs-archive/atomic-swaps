@@ -23,7 +23,11 @@ export class SwapParty {
         this.state = SwapState.empty;
     }
 
-    static async init(privateKey: string, ethProvider: ethers.providers.Provider, syncProvider: zksync.Provider) {
+    protected static async init(
+        privateKey: string,
+        ethProvider: ethers.providers.Provider,
+        syncProvider: zksync.Provider
+    ) {
         const ethWallet = new ethers.Wallet(privateKey).connect(ethProvider);
         const syncWallet = await zksync.Wallet.fromEthSigner(ethWallet, syncProvider);
         const { privkey, pubkey } = await getSyncKeys(ethWallet);
