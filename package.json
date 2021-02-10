@@ -27,9 +27,19 @@
         "build:sol": "solcjs -o build --bin --optimize --base-path . contracts/Deployer.sol",
         "build": "yarn build:ts && yarn build:sol",
         "doc": "typedoc",
-        "test": "mocha --no-timeout --no-color --bail --exit -r ts-node/register test/*.test.ts",
+        "test": "mocha test/*.test.ts -f exodus -i",
+        "exodus": "mocha test/*.test.ts -f exodus",
         "fmt:ts": "prettier --config fmt-ts.json --write {src,test}/*.ts",
         "fmt:sol": "prettier --config fmt-sol.json --write contracts/*.sol",
         "fmt": "yarn fmt:ts && yarn fmt:sol"
+    },
+    "mocha": {
+        "exit": true,
+        "bail": true,
+        "color": false,
+        "timeout": 0,
+        "require": [
+            "ts-node/register"
+        ]
     }
 }
