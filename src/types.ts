@@ -23,4 +23,11 @@ export interface SchnorrData {
     commitments?: Uint8Array[];
 }
 
-export type TxType = 'L1' | 'L2';
+export enum SwapState {
+    empty,
+    prepared,
+    signed,
+    checked,
+    deposited,
+    finalized
+}

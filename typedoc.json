@@ -5,6 +5,7 @@
     "out": "docs",
     "theme": "minimal",
     "excludePrivate": true,
+    "excludeProtected": true,
     "name": "Atomic Swap SDK",
     "hideGenerator": true
 }

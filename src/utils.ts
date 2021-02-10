@@ -6,7 +6,6 @@ import { SwapData } from './types';
 export const TOTAL_TRANSACTIONS = 5;
 export const SYNC_PREFIX = 'sync:';
 export const SYNC_TX_PREFIX = 'sync-tx:';
-const DEFAULT_PUBKEY_HASH = 'sync:0000000000000000000000000000000000000000';
 
 export function transpose<T>(matrix: T[][]): T[][] {
     return matrix[0].map((_, index) => matrix.map((row) => row[index]));
@@ -30,21 +29,26 @@ export async function getSyncKeys(ethWallet: ethers.Wallet) {
     return { privkey, pubkey };
 }
 
-export async function isSigningKeySet(address: zksync.types.Address, provider: zksync.Provider) {
-    const account = await provider.getState(address);
-    return account.committed.pubKeyHash != DEFAULT_PUBKEY_HASH;
+export function getTargetAddress(transaction: any) {
+    switch (transaction.type) {
+        case 'Transfer':
+            return transaction.to;
+        case 'ChangePubKey':
+            return transaction.account;
+        case 'Withdraw':
+            return transaction.ethAddress;
+        default:
+            throw new Error('Invalid transaction type');
+    }
 }
 
-export function getSignBytes(transaction: any, signer: zksync.Signer): Uint8Array {
-    if (transaction.type == 'Transfer') {
-        return signer.transferSignBytes(transaction);
-    } else if (transaction.type == 'Withdraw') {
-        return signer.withdrawSignBytes(transaction);
-    } else if (transaction.type == 'ChangePubKey') {
-        return signer.changePubKeySignBytes(transaction);
-    } else {
-        throw new Error('Invalid transaction type');
+export function getFeeType(transaction: any) {
+    if (transaction.type == 'ChangePubKey') {
+        return {
+            ChangePubKey: { onchainPubkeyAuth: false }
+        };
     }
+    return transaction.type;
 }
 
 export function formatTx(tx: any, signature: Uint8Array, pubkey: Uint8Array) {

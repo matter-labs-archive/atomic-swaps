@@ -70,7 +70,7 @@ describe('Tests', () => {
         console.log('    client prepared for the swap');
         const txs = await provider.signSwap(data);
         console.log('    provider signed transactions');
-        const { swap, shares } = await client.signSwap(txs);
+        const shares = await client.signSwap(txs);
         console.log('    client signed transactions');
         const hash = await client.depositFunds('L2');
         console.log('    client deposited funds');
@@ -79,7 +79,6 @@ describe('Tests', () => {
         if (verify) {
             await syncProvider.notifyTransaction(hash, 'VERIFY');
         }
-        return swap;
     }
 
     before('Init client and provider', async () => {
@@ -92,8 +91,8 @@ describe('Tests', () => {
         const richWallet = await zksync.Wallet.fromEthSigner(rich, syncProvider);
         const clientKey = await createWallet(richWallet, 'ETH', utils.parseEther('50.0'));
         const providerKey = await createWallet(richWallet, 'DAI', utils.parseUnits('50000.0', 18));
-        client = await SwapClient.init(clientKey, ethProvider, syncProvider);
-        provider = await SwapProvider.init(providerKey, ethProvider, syncProvider);
+        client = (await SwapClient.init(clientKey, ethProvider, syncProvider)) as SwapClient;
+        provider = (await SwapProvider.init(providerKey, ethProvider, syncProvider)) as SwapProvider;
 
         // extract CREATE2 data
         const rescuerBytecode = '0x' + fs.readFileSync(RESCUER_CONTRACT).toString();
@@ -126,9 +125,9 @@ describe('Tests', () => {
         const providerBalance = await getBalance(provider.address(), 'ETH');
         const clientBalance = await getBalance(client.address(), 'DAI');
 
-        const swap = await exchangeSwapInfo(client, provider);
+        await exchangeSwapInfo(client, provider);
         await Promise.all([
-            swap.wait(),
+            client.wait(),
             (async () => {
                 await new Promise((r) => setTimeout(r, 3000));
                 await provider.depositFunds('L2');
@@ -145,34 +144,20 @@ describe('Tests', () => {
     it('should perform atomic swap, finalized by client', async () => {
         const clientBalance = await getBalance(client.address(), 'DAI');
 
-        const swap = await exchangeSwapInfo(client, provider);
-        await provider.depositFunds('L2');
-        await swap.finalize();
-
-        const newClientBalance = await getBalance(client.address(), 'DAI');
-        expect(newClientBalance.sub(clientBalance).eq(utils.parseUnits('1000.0', 18))).to.be.true;
-    });
-
-    it('should perform atomic swap, withdraw to L1', async () => {
-        const clientBalance = await getBalance(client.address(), 'DAI');
-
-        swapData.withdrawType = 'L1';
         await exchangeSwapInfo(client, provider);
         await provider.depositFunds('L2');
-        await provider.finalizeSwap();
+        await client.finalizeSwap();
 
         const newClientBalance = await getBalance(client.address(), 'DAI');
         expect(newClientBalance.sub(clientBalance).eq(utils.parseUnits('1000.0', 18))).to.be.true;
-
-        swapData.withdrawType = 'L2';
     });
 
     it('should cancel an atomic swap', async () => {
         const clientBalance = (await syncProvider.getState(client.address())).committed.balances;
 
         swapData.timeout = Math.floor(Date.now() / 1000);
-        const swap = await exchangeSwapInfo(client, provider);
-        await swap.cancel();
+        await exchangeSwapInfo(client, provider);
+        await client.cancelSwap();
 
         const newClientBalance = (await syncProvider.getState(client.address())).committed.balances;
         const difference = BigNumber.from(clientBalance.ETH).sub(newClientBalance.ETH);
