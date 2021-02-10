@@ -36,7 +36,7 @@ export class SwapClient extends SwapParty {
         providerPrecommitments: Uint8Array[]
     ) {
         if (this.state != SwapState.empty) {
-            throw new Error("SwapClient is in the middle of a swap - can't start a new one");
+            throw new Error("In the middle of a swap - can't start a new one");
         }
         this.swapData = data;
         this.signer = new MusigSigner([providerPubkey, this.publicKey], CLIENT_MUSIG_POSITION, TOTAL_TRANSACTIONS);
@@ -88,7 +88,7 @@ export class SwapClient extends SwapParty {
      */
     async signSwap(data: { commitments: Uint8Array[]; shares: Uint8Array[] }) {
         if (this.state != SwapState.prepared) {
-            throw new Error('SwapClient is not prepared for the swap');
+            throw new Error('Not prepared for the swap');
         }
         this.signer.receiveCommitments(transpose([data.commitments, this.commitments]));
         const musigPubkey = this.signer.computePubkey();
@@ -103,7 +103,7 @@ export class SwapClient extends SwapParty {
             // this could mean that either provider sent incorrect signature shares
             // or provider signed transactions containing wrong data
             if (!this.signer.verify(bytes, signature)) {
-                throw new Error('Provided signature shares were invalid');
+                throw new Error('Provided signature shares are invalid');
             }
             formatTx(tx, signature, musigPubkey);
         });
@@ -112,9 +112,9 @@ export class SwapClient extends SwapParty {
         return shares;
     }
 
-    async depositFunds(depositType: 'L1' | 'L2', autoApprove: boolean = true) {
+    async depositFunds(depositType: 'L1' | 'L2' = 'L2', autoApprove: boolean = true) {
         if (this.state != SwapState.signed) {
-            throw new Error("SwapClient has not yet signed the transactions - can't deposit funds");
+            throw new Error("Not yet signed the transactions - can't deposit funds");
         }
         const amount = this.swapData.sell.amount.add(this.transactions[0].fee).add(this.transactions[2].fee);
         const hash = await this.deposit(this.swapData.sell.token, amount, depositType, autoApprove);
@@ -122,14 +122,14 @@ export class SwapClient extends SwapParty {
         return hash;
     }
 
-    async wait() {
+    async wait(action: 'COMMIT' | 'VERIFY' = 'COMMIT') {
         if (this.state != SwapState.deposited) {
-            throw new Error('...');
+            throw new Error('No funds on the swap account - nothing to wait for');
         }
         const hash = utils.sha256(this.getSignBytes(this.transactions[1]));
         const timeout = this.swapData.timeout * 1000 - Date.now();
         const result = await Promise.race([
-            this.syncWallet.provider.notifyTransaction(hash.replace('0x', SYNC_TX_PREFIX), 'COMMIT'),
+            this.syncWallet.provider.notifyTransaction(hash.replace('0x', SYNC_TX_PREFIX), action),
             new Promise((resolve) => setTimeout(resolve, timeout, null))
         ]);
         if (result) {
@@ -140,7 +140,7 @@ export class SwapClient extends SwapParty {
 
     async finalizeSwap() {
         if (this.state != SwapState.deposited) {
-            throw new Error('...');
+            throw new Error('No funds on the swap account - nothing to finalize');
         }
         await this.sendBatch([this.transactions[0]], this.swapData.sell.token);
         const hashes = await this.sendBatch([this.transactions[1]], this.swapData.sell.token);
@@ -149,8 +149,11 @@ export class SwapClient extends SwapParty {
     }
 
     async cancelSwap() {
+        if (Date.now() < this.swapData.timeout * 1000) {
+            throw new Error('Too early to cancel the swap');
+        }
         if (this.state != SwapState.deposited) {
-            throw new Error('...');
+            throw new Error('No funds on the swap account - nothing to cancel');
         }
         await this.sendBatch([this.transactions[0]], this.swapData.sell.token);
         const hashes = await this.sendBatch([this.transactions[3]], this.swapData.sell.token);

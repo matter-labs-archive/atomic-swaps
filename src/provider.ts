@@ -29,7 +29,7 @@ export class SwapProvider extends SwapParty {
      */
     async prepareSwap(data: SwapData, clientPubkey: string, clientAddress: string) {
         if (this.state != SwapState.empty) {
-            throw new Error("SwapProvider is in the middle of a swap - can't start a new one");
+            throw new Error("In the middle of a swap - can't start a new one");
         }
         this.signer = new MusigSigner([this.publicKey, clientPubkey], PROVIDER_MUSIG_POSITION, TOTAL_TRANSACTIONS);
         this.schnorrData.precommitments = this.signer.computePrecommitments();
@@ -54,7 +54,7 @@ export class SwapProvider extends SwapParty {
      */
     async signSwap(data: SchnorrData) {
         if (this.state != SwapState.prepared) {
-            throw new Error('SwapProvider is not prepared for the swap');
+            throw new Error('Not prepared for the swap');
         }
         this.schnorrData.commitments = this.signer.receivePrecommitments(
             transpose([this.schnorrData.precommitments, data.precommitments])
@@ -88,7 +88,7 @@ export class SwapProvider extends SwapParty {
      */
     async checkSwap(signatureShares: Uint8Array[]) {
         if (this.state != SwapState.signed) {
-            throw new Error('SwapProvider has not yet signed the swap transactions');
+            throw new Error('Not yet signed the swap transactions');
         }
         const musigPubkey = this.signer.computePubkey();
         this.transactions.forEach((tx, i) => {
@@ -97,7 +97,7 @@ export class SwapProvider extends SwapParty {
             // this could mean that either client sent incorrect signature shares
             // or client signed transactions containing wrong data
             if (!this.signer.verify(bytes, signature)) {
-                throw new Error('Provided signature shares were invalid');
+                throw new Error('Provided signature shares are invalid');
             }
             formatTx(tx, signature, musigPubkey);
         });
@@ -110,9 +110,9 @@ export class SwapProvider extends SwapParty {
     }
 
     /** Deposits provider's funds to the multisig account */
-    async depositFunds(depositType: 'L1' | 'L2', autoApprove: boolean = true) {
+    async depositFunds(depositType: 'L1' | 'L2' = 'L2', autoApprove: boolean = true) {
         if (this.state != SwapState.checked) {
-            throw new Error("SwapProvider has not yet checked the signatures - can't deposit funds");
+            throw new Error('Not yet checked the signatures - not safe to deposit funds');
         }
         const amount = this.swapData.buy.amount.add(this.transactions[1].fee);
         const hash = await this.deposit(this.swapData.buy.token, amount, depositType, autoApprove);
@@ -123,7 +123,7 @@ export class SwapProvider extends SwapParty {
     /** Sends 3 transactions that will finalize the swap */
     async finalizeSwap() {
         if (this.state != SwapState.deposited) {
-            throw new Error("SwapProvider has not yet deposited funds - can't finalize swap");
+            throw new Error('No funds on the swap account - nothing to finalize');
         }
         await this.sendBatch([this.transactions[0]], this.swapData.buy.token);
         const hashes = await this.sendBatch(this.transactions.slice(1, 3), this.swapData.buy.token);

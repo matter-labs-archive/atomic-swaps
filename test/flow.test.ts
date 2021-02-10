@@ -169,10 +169,6 @@ describe('Tests', () => {
 
     describe('Exodus mode test', () => {
         it('should rescue funds in case of exodus mode', async () => {
-            // zk dummy-prover enable --no-redeploy
-            // EASY_EXODUS=true zk init
-            // zk server
-            // zk dummy-prover run
             const syncContract = new ethers.Contract(
                 syncProvider.contractAddress.mainContract,
                 zksync.utils.SYNC_MAIN_CONTRACT_INTERFACE,
