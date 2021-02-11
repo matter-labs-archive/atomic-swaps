@@ -81,7 +81,7 @@ describe('Tests', () => {
         console.log('    provider signed transactions');
         const shares = await client.signSwap(txs);
         console.log('    client signed transactions');
-        const hash = await client.depositFunds('L2');
+        const hash = await client.depositFunds();
         console.log('    client deposited funds');
         await provider.checkSwap(shares);
         console.log('    provider checked swap validity');
@@ -139,7 +139,7 @@ describe('Tests', () => {
             client.wait(),
             (async () => {
                 await new Promise((r) => setTimeout(r, 3000));
-                await provider.depositFunds('L2');
+                await provider.depositFunds();
                 await provider.finalizeSwap();
             })()
         ]);
@@ -154,7 +154,7 @@ describe('Tests', () => {
         const clientBalance = await getBalance(client.address(), 'DAI');
 
         await exchangeSwapInfo(client, provider);
-        await provider.depositFunds('L2');
+        await provider.depositFunds();
         await client.finalizeSwap();
 
         const newClientBalance = await getBalance(client.address(), 'DAI');
@@ -189,7 +189,7 @@ describe('Tests', () => {
         });
 
         await exchangeSwapInfo(client, provider, true);
-        const hash = await provider.depositFunds('L2');
+        const hash = await provider.depositFunds();
 
         // wait until the deposits are verified
         await syncProvider.notifyTransaction(hash, 'VERIFY');

@@ -42,10 +42,12 @@ export class SwapParty {
         return this.publicKey;
     }
 
+    /** @returns zkSync account ID */
     id() {
         return this.syncWallet.getAccountId();
     }
 
+    /** @returns */
     swapAddress() {
         if (this.state == SwapState.empty) {
             throw new Error('No active swaps present');

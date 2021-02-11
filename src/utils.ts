@@ -23,7 +23,7 @@ export async function getSyncKeys(ethWallet: ethers.Wallet) {
     }
     const signedBytes = zksync.utils.getSignedBytesFromMessage(message, false);
     const signature = await zksync.utils.signMessagePersonalAPI(ethWallet, signedBytes);
-    const seed = ethers.utils.arrayify(signature);
+    const seed = utils.arrayify(signature);
     const privkey = privateKeyFromSeed(seed);
     const pubkey = private_key_to_pubkey(privkey);
     return { privkey, pubkey };
@@ -46,6 +46,7 @@ export function getFeeType(transaction: any) {
     if (transaction.type == 'ChangePubKey') {
         return {
             ChangePubKey: { onchainPubkeyAuth: false }
+            // ChangePubKey: transaction.ethAuthData.type
         };
     }
     return transaction.type;
@@ -87,79 +88,79 @@ export async function getTransactions(
     const sellTokenId = syncProvider.tokenSet.resolveTokenId(swapData.sell.token);
     const nonce = swapAccount.committed.nonce;
 
-    // prettier-ignore
     return [
-    {
-        type: 'ChangePubKey',
-        accountId: swapAccount.id,
-        account: swapAccount.address,
-        newPkHash: utils.hexlify(pubKeyHash).replace('0x', SYNC_PREFIX),
-        nonce,
-        feeTokenId: sellTokenId,
-        fee: 0,
-        validFrom: 0,
-        validUntil: zksync.utils.MAX_TIMESTAMP,
-        ethAuthData: {
-            type: 'CREATE2',
-            creatorAddress: swapData.create2.creator,
-            saltArg: swapData.create2.salt,
-            codeHash: swapData.create2.hash
+        {
+            type: 'ChangePubKey',
+            accountId: swapAccount.id,
+            account: swapAccount.address,
+            newPkHash: utils.hexlify(pubKeyHash).replace('0x', SYNC_PREFIX),
+            nonce,
+            feeTokenId: sellTokenId,
+            fee: 0,
+            validFrom: 0,
+            validUntil: zksync.utils.MAX_TIMESTAMP,
+            ethAuthData: {
+                type: 'CREATE2',
+                creatorAddress: swapData.create2.creator,
+                saltArg: swapData.create2.salt,
+                codeHash: swapData.create2.hash
+            }
+        },
+
+        {
+            type: 'Transfer',
+            tokenId: buyTokenId,
+            accountId: swapAccount.id,
+            from: swapAccount.address,
+            to: clientAddress,
+            amount: swapData.buy.amount,
+            fee: 0,
+            feeTokenId: buyTokenId,
+            nonce: nonce + 1,
+            validFrom: 0,
+            validUntil: swapData.timeout
+        },
+
+        {
+            type: 'Transfer',
+            tokenId: sellTokenId,
+            accountId: swapAccount.id,
+            from: swapAccount.address,
+            to: providerAddress,
+            amount: swapData.sell.amount,
+            fee: 0,
+            feeTokenId: sellTokenId,
+            nonce: nonce + 2,
+            validFrom: 0,
+            validUntil: zksync.utils.MAX_TIMESTAMP
+        },
+
+        {
+            type: 'Transfer',
+            tokenId: sellTokenId,
+            accountId: swapAccount.id,
+            from: swapAccount.address,
+            to: clientAddress,
+            amount: swapData.sell.amount,
+            fee: 0,
+            feeTokenId: sellTokenId,
+            nonce: nonce + 1,
+            validFrom: swapData.timeout + 1,
+            validUntil: zksync.utils.MAX_TIMESTAMP
+        },
+
+        {
+            type: 'Transfer',
+            tokenId: buyTokenId,
+            accountId: swapAccount.id,
+            from: swapAccount.address,
+            to: providerAddress,
+            amount: swapData.buy.amount,
+            fee: 0,
+            feeTokenId: buyTokenId,
+            nonce: nonce + 2,
+            validFrom: swapData.timeout + 1,
+            validUntil: zksync.utils.MAX_TIMESTAMP
         }
-    },
-
-    {
-        type: 'Transfer',
-        tokenId: buyTokenId,
-        accountId: swapAccount.id,
-        from: swapAccount.address,
-        to: clientAddress,
-        amount: swapData.buy.amount,
-        fee: 0,
-        feeTokenId: buyTokenId,
-        nonce: nonce + 1,
-        validFrom: 0,
-        validUntil: swapData.timeout
-    },
-
-    {
-        type: 'Transfer',
-        tokenId: sellTokenId,
-        accountId: swapAccount.id,
-        from: swapAccount.address,
-        to: providerAddress,
-        amount: swapData.sell.amount,
-        fee: 0,
-        feeTokenId: sellTokenId,
-        nonce: nonce + 2,
-        validFrom: 0,
-        validUntil: zksync.utils.MAX_TIMESTAMP
-    },
-
-    {
-        type: 'Transfer',
-        tokenId: sellTokenId,
-        accountId: swapAccount.id,
-        from: swapAccount.address,
-        to: clientAddress,
-        amount: swapData.sell.amount,
-        fee: 0,
-        feeTokenId: sellTokenId,
-        nonce: nonce + 1,
-        validFrom: swapData.timeout + 1,
-        validUntil: zksync.utils.MAX_TIMESTAMP
-    },
-
-    {
-        type: 'Transfer',
-        tokenId: buyTokenId,
-        accountId: swapAccount.id,
-        from: swapAccount.address,
-        to: providerAddress,
-        amount: swapData.buy.amount,
-        fee: 0,
-        feeTokenId: buyTokenId,
-        nonce: nonce + 2,
-        validFrom: swapData.timeout + 1,
-        validUntil: zksync.utils.MAX_TIMESTAMP
-    }];
+    ];
 }

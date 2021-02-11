@@ -1,6 +1,13 @@
 import { types } from 'zksync';
 import { BigNumber } from 'ethers';
 
+/**
+ * Type that contains all information about the Atomic Swap:
+ * - token pair
+ * - token amounts
+ * - timeout, after which swap can be cancelled
+ * - CREATE2 data regarding the multisig swap account
+ */
 export interface SwapData {
     sell: {
         token: types.TokenLike;

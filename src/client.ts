@@ -1,5 +1,5 @@
 /**
- * This file provides Swap and SwapClient classes - essentially a client-side part of the SDK
+ * This file provides the SwapClient class - essentially a client-side part of the SDK
  * @packageDocumentation
  */
 
@@ -19,6 +19,7 @@ const CLIENT_MUSIG_POSITION = 1;
 export class SwapClient extends SwapParty {
     private commitments: Uint8Array[];
 
+    /** async factory method */
     static async init(privateKey: string, ethProvider: providers.Provider, syncProvider: zksync.Provider) {
         return (await super.init(privateKey, ethProvider, syncProvider)) as SwapClient;
     }
@@ -27,7 +28,7 @@ export class SwapClient extends SwapParty {
      * This method generates precommitments and commitments for schnorr-musig protocol,
      * makes a 0-transfer to the multisig account so that the server assigns an ID to it, and generates
      * all 5 transactions needed for the swap.
-     * @returns precommitments and commitments for schnorr-musig protocol
+     * @returns precommitments and commitments for schnorr-musig protocol to be sent to provider
      */
     async prepareSwap(
         data: SwapData,
@@ -84,7 +85,7 @@ export class SwapClient extends SwapParty {
      * generates client's signature shares and combines them into full transaction signatures.
      *
      * If signatures are correct, method transfers client's funds to the multisig, otherwise an error is thrown.
-     * @returns signature shares to send to the provider and a [[Swap]] object with necessary data to finish or cancel the swap
+     * @returns signature shares to send to the provider
      */
     async signSwap(data: { commitments: Uint8Array[]; shares: Uint8Array[] }) {
         if (this.state != SwapState.prepared) {
@@ -112,16 +113,20 @@ export class SwapClient extends SwapParty {
         return shares;
     }
 
+    /** Deposits client's funds to the multisig account */
     async depositFunds(depositType: 'L1' | 'L2' = 'L2', autoApprove: boolean = true) {
         if (this.state != SwapState.signed) {
             throw new Error("Not yet signed the transactions - can't deposit funds");
         }
-        const amount = this.swapData.sell.amount.add(this.transactions[0].fee).add(this.transactions[2].fee);
-        const hash = await this.deposit(this.swapData.sell.token, amount, depositType, autoApprove);
+        const hash = await this.deposit(this.swapData.sell.token, this.swapData.sell.amount, depositType, autoApprove);
         this.state = SwapState.deposited;
         return hash;
     }
 
+    /**
+     * Waits until the transaction that finalizes the swap is sent onchain.
+     * @returns true if the transaction is sent before the timeout, false otherwise
+     */
     async wait(action: 'COMMIT' | 'VERIFY' = 'COMMIT') {
         if (this.state != SwapState.deposited) {
             throw new Error('No funds on the swap account - nothing to wait for');
@@ -138,8 +143,11 @@ export class SwapClient extends SwapParty {
         return result !== null;
     }
 
+    /** Sends transactions that will finalize the swap */
     async finalizeSwap() {
-        if (this.state != SwapState.deposited) {
+        const swapAccount = await this.syncWallet.provider.getState(this.create2Info.address);
+        const balance = swapAccount.committed.balances[this.swapData.buy.token];
+        if (this.state != SwapState.deposited || this.swapData.buy.amount.gt(balance)) {
             throw new Error('No funds on the swap account - nothing to finalize');
         }
         await this.sendBatch([this.transactions[0]], this.swapData.sell.token);
@@ -148,6 +156,7 @@ export class SwapClient extends SwapParty {
         return hashes;
     }
 
+    /** Cancels the swap and returns all client's funds from the swap account */
     async cancelSwap() {
         if (Date.now() < this.swapData.timeout * 1000) {
             throw new Error('Too early to cancel the swap');

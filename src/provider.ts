@@ -1,5 +1,5 @@
 /**
- * This file contains an implementation if SwapProvider class - essentially a server-side part of the SDK
+ * This file contains an implementation of SwapProvider class - essentially a server-side part of the SDK
  * @packageDocumentation
  */
 
@@ -20,6 +20,7 @@ export class SwapProvider extends SwapParty {
     private schnorrData: SchnorrData = {};
     private clientAddress: string;
 
+    /** async factory method */
     static async init(privateKey: string, ethProvider: providers.Provider, syncProvider: zksync.Provider) {
         return (await super.init(privateKey, ethProvider, syncProvider)) as SwapProvider;
     }
@@ -114,13 +115,12 @@ export class SwapProvider extends SwapParty {
         if (this.state != SwapState.checked) {
             throw new Error('Not yet checked the signatures - not safe to deposit funds');
         }
-        const amount = this.swapData.buy.amount.add(this.transactions[1].fee);
-        const hash = await this.deposit(this.swapData.buy.token, amount, depositType, autoApprove);
+        const hash = await this.deposit(this.swapData.buy.token, this.swapData.buy.amount, depositType, autoApprove);
         this.state = SwapState.deposited;
         return hash;
     }
 
-    /** Sends 3 transactions that will finalize the swap */
+    /** Sends transactions that will finalize the swap */
     async finalizeSwap() {
         if (this.state != SwapState.deposited) {
             throw new Error('No funds on the swap account - nothing to finalize');

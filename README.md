@@ -15,7 +15,7 @@ To generate docs, run `yarn doc`. This will output HTML docs into the `docs/` fo
 #### Setup
 
 For testing, a local **zkSync** setup is necessary.
-[https://github.com/matter-labs/zksync/blob/master/docs/setup-dev.md](See our docs).
+[See our docs](https://github.com/matter-labs/zksync/blob/master/docs/setup-dev.md).
 
 After setup is complete, run `zk init`.
 
@@ -34,12 +34,12 @@ Preparation:
     - set `dummy_verifier` and `easy_exodus` to `true`
 3. Initialize the environment (`zk init`)
 4. Start the server (`zk server`)
-5. Start the prover (`zk dummy_prover run`)
+5. Start the prover (`zk dummy-prover run`)
 
-`yarn exodus` launches the test. After test is complete, server is no longer usable (since it is in exodus mode) and will have to be reset.
+`yarn exodus` launches the test. After test is complete, server is no longer usable (since exodus mode is activated) and will have to be reset.
 
 To reset the server:
-- Stop it.
+- Stop it
 - Run `zk contract redeploy`
 - Run `zk server --genesis`
 - Start the server again with `zk server`
