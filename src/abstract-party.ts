@@ -47,7 +47,7 @@ export class SwapParty {
         return this.syncWallet.getAccountId();
     }
 
-    /** @returns */
+    /** @returns address of the swap account */
     swapAddress() {
         if (this.state == SwapState.empty) {
             throw new Error('No active swaps present');
@@ -55,6 +55,7 @@ export class SwapParty {
         return this.create2Info.address;
     }
 
+    /** @returns actual salt that will be used for CREATE2 */
     swapSalt() {
         if (this.state == SwapState.empty) {
             throw new Error('No active swaps present');
@@ -62,6 +63,7 @@ export class SwapParty {
         return this.create2Info.salt;
     }
 
+    /** resets the state */
     reset() {
         this.state = SwapState.empty;
     }
