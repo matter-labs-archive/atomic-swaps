@@ -24,6 +24,25 @@ export class SwapClient extends SwapParty {
         return (await super.init(privateKey, ethProvider, syncProvider)) as SwapClient;
     }
 
+    async loadSwap(swapData: SwapData, signedTransactions: any[]) {
+        if (this.state != SwapState.empty) {
+            throw new Error("In the middle of a swap - can't switch to a new one");
+        }
+        this.swapData = swapData;
+        this.transactions = signedTransactions;
+        const swapAddress = signedTransactions[0].account;
+        const swapAccount = await this.syncWallet.provider.getState(swapAddress);
+        const balance = swapAccount.committed.balances[swapData.sell.token];
+        this.state = swapData.sell.amount.gt(balance) ? SwapState.signed : SwapState.deposited;
+    }
+
+    signedTransactions() {
+        if (this.state != SwapState.signed && this.state != SwapState.deposited) {
+            throw new Error('Transactions are not signed yet');
+        }
+        return this.transactions;
+    }
+
     /**
      * This method generates precommitments and commitments for schnorr-musig protocol,
      * makes a 0-transfer to the multisig account so that the server assigns an ID to it, and generates
@@ -145,7 +164,7 @@ export class SwapClient extends SwapParty {
 
     /** Sends transactions that will finalize the swap */
     async finalizeSwap() {
-        const swapAccount = await this.syncWallet.provider.getState(this.create2Info.address);
+        const swapAccount = await this.syncWallet.provider.getState(this.swapAddress());
         const balance = swapAccount.committed.balances[this.swapData.buy.token];
         if (this.state != SwapState.deposited || this.swapData.buy.amount.gt(balance)) {
             throw new Error('No funds on the swap account - nothing to finalize');

@@ -8,5 +8,14 @@
         "noEmitOnError": true,
         "declaration": true
     },
-    "files": [ "src/index.ts" ]
+    "files": [ "src/index.ts" ],
+    "typedocOptions": {
+        "entryPoints": [ "src/index.ts" ],
+        "out": "docs",
+        "theme": "minimal",
+        "excludePrivate": true,
+        "excludeProtected": true,
+        "name": "Atomic Swap SDK",
+        "hideGenerator": true
+    }
 }

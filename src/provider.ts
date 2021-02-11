@@ -25,6 +25,25 @@ export class SwapProvider extends SwapParty {
         return (await super.init(privateKey, ethProvider, syncProvider)) as SwapProvider;
     }
 
+    async loadSwap(swapData: SwapData, signedTransactions: any[]) {
+        if (this.state != SwapState.empty) {
+            throw new Error("In the middle of a swap - can't switch to a new one");
+        }
+        this.swapData = swapData;
+        this.transactions = signedTransactions;
+        const swapAddress = signedTransactions[0].account;
+        const swapAccount = await this.syncWallet.provider.getState(swapAddress);
+        const balance = swapAccount.committed.balances[swapData.buy.token];
+        this.state = swapData.buy.amount.gt(balance) ? SwapState.checked : SwapState.deposited;
+    }
+
+    signedTransactions() {
+        if (this.state != SwapState.checked && this.state != SwapState.deposited) {
+            throw new Error('Transactions are not signed yet');
+        }
+        return this.transactions;
+    }
+
     /**
      * Generates precommitments for the schnorr-musig protocol
      */
@@ -102,10 +121,10 @@ export class SwapProvider extends SwapParty {
             }
             formatTx(tx, signature, musigPubkey);
         });
-        const swapAccountBalance = (await this.syncWallet.provider.getState(this.swapAddress())).committed.balances;
-        const necessaryDeposit = this.swapData.sell.amount.add(this.transactions[0].fee).add(this.transactions[2].fee);
-        if (necessaryDeposit.gt(swapAccountBalance[this.swapData.sell.token])) {
-            throw new Error('Client did not deposit funds');
+        const swapAccount = await this.syncWallet.provider.getState(this.swapAddress());
+        const balance = swapAccount.committed.balances[this.swapData.sell.token];
+        if (this.swapData.sell.amount.gt(balance)) {
+            throw new Error('Client did not deposit enough funds');
         }
         this.state = SwapState.checked;
     }
