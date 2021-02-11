@@ -258,12 +258,14 @@ describe('Tests', () => {
         const abi = ['function clientWithdraw()', 'function providerWithdraw()'];
         const rescuer = new ethers.Contract(client.swapAddress(), abi, rich);
 
+        const balanceBefore = await ethProvider.getBalance(client.address());
+
         // rescue the funds and verify that transfer is correct
         const rescue = await rescuer.clientWithdraw();
         await rescue.wait();
 
-        const clientBalance = await ethProvider.getBalance(client.address());
-        expect(clientBalance.gte(utils.parseEther('1.0'))).to.be.true;
+        const balanceAfter = await ethProvider.getBalance(client.address());
+        expect(balanceAfter.sub(balanceBefore).eq(utils.parseEther('1.0'))).to.be.true;
         console.log('      funds rescued from the escrow contract');
     });
 });
