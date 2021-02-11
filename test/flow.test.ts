@@ -13,6 +13,16 @@ const RICH_PRIVATE_KEY = '0x7726827caac94a7f9e1b160f7ea819f172f7b6f9d2a97f992c38
 const RESCUER_CONTRACT = 'build/contracts_Rescuer_sol_Rescuer.bin';
 const DEPLOYER_CONTRACT = 'build/contracts_Deployer_sol_Deployer.bin';
 
+declare global {
+    interface Array<T> {
+        last(): T;
+    }
+}
+
+Array.prototype.last = function () {
+    return this[this.length - 1];
+};
+
 describe('Tests', () => {
     let client: SwapClient;
     let provider: SwapProvider;
@@ -100,10 +110,10 @@ describe('Tests', () => {
         // we use zero-address if the token is ETH
         const ethAddress = syncProvider.tokenSet.resolveTokenAddress('ETH');
         const args = [client.address(), provider.address(), ethAddress, daiAddress].map((address) =>
-            utils.hexlify(utils.zeroPad(address, 32))
+            utils.hexlify(utils.zeroPad(address, 32)).slice(2)
         );
         // compute the hash of the to-be-deployed code of escrow contract
-        swapData.create2.hash = utils.keccak256(rescuerBytecode + args.join('').replace(/0x/g, ''));
+        swapData.create2.hash = utils.keccak256(rescuerBytecode + args.join(''));
 
         // deploy the factory contract
         const abi = ['function deploy(bytes32, address, address, address, address)'];
@@ -200,15 +210,10 @@ describe('Tests', () => {
 
         // fetch data about last verified block
         const verifyTx = await ethProvider.getTransaction(verifyTxHash);
-        const blockInfoBytes = utils.arrayify(verifyTx.data);
-        const blockInfo = {
-            blockNumber: utils.hexlify(blockInfoBytes.slice(100, 132)),
-            priorityOperations: utils.hexlify(blockInfoBytes.slice(132, 164)),
-            pendingOnchainOperationsHash: blockInfoBytes.slice(164, 196),
-            timestamp: utils.hexlify(blockInfoBytes.slice(196, 228)),
-            stateHash: blockInfoBytes.slice(228, 260),
-            commitment: blockInfoBytes.slice(260, 292)
-        };
+        const blockInfo = zksync.utils.SYNC_MAIN_CONTRACT_INTERFACE.decodeFunctionData(
+            'executeBlocks',
+            verifyTx.data
+        )._blocksData.last().storedBlock;
         console.log('      verified block info fetched');
 
         // post exit proof onchain

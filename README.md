@@ -36,7 +36,13 @@ Preparation:
 4. Start the server (`zk server`)
 5. Start the prover (`zk dummy_prover run`)
 
-`yarn exodus` launches the test. After test is complete, server is no longer usable (since it is in exodus mode) and will have to be re-`init`ed.
+`yarn exodus` launches the test. After test is complete, server is no longer usable (since it is in exodus mode) and will have to be reset.
+
+To reset the server:
+- Stop it.
+- Run `zk contract redeploy`
+- Run `zk server --genesis`
+- Start the server again with `zk server`
 
 ### Example usage
 
