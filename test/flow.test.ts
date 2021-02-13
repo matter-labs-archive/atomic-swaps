@@ -30,6 +30,7 @@ describe('Tests', () => {
     let ethProvider: ethers.providers.Provider;
     let syncProvider: zksync.Provider;
     let deployer: ethers.Contract;
+    let args: ethers.BytesLike[];
 
     const swapData: SwapData = {
         sell: {
@@ -109,14 +110,15 @@ describe('Tests', () => {
         const daiAddress = syncProvider.tokenSet.resolveTokenAddress('DAI');
         // we use zero-address if the token is ETH
         const ethAddress = syncProvider.tokenSet.resolveTokenAddress('ETH');
-        const args = [client.address(), provider.address(), ethAddress, daiAddress].map((address) =>
-            utils.hexlify(utils.zeroPad(address, 32)).slice(2)
-        );
+        const timeout = utils.arrayify(BigNumber.from(swapData.timeout));
+        const syncAddress = syncProvider.contractAddress.mainContract;
+        args = [client.address(), provider.address(), ethAddress, daiAddress, timeout, syncAddress];
+        const encodedArgs = args.map((bytes) => utils.hexlify(utils.zeroPad(bytes, 32)).slice(2)).join('');
         // compute the hash of the to-be-deployed code of escrow contract
-        swapData.create2.hash = utils.keccak256(rescuerBytecode + args.join(''));
+        swapData.create2.hash = utils.keccak256(rescuerBytecode + encodedArgs);
 
         // deploy the factory contract
-        const abi = ['function deploy(bytes32, address, address, address, address)'];
+        const abi = ['function deploy(bytes32, address, address, address, address, uint64, address)'];
         const deployerBytecode = '0x' + fs.readFileSync(DEPLOYER_CONTRACT).toString();
         const factory = new ethers.ContractFactory(abi, deployerBytecode, rich);
         deployer = await factory.deploy();
@@ -245,13 +247,9 @@ describe('Tests', () => {
         console.log('      funds withdrawn to the escrow contract');
 
         // deploy escrow contract
-        const deploy = await deployer.deploy(
-            client.swapSalt(),
-            client.address(),
-            provider.address(),
-            syncProvider.tokenSet.resolveTokenAddress('ETH'),
-            syncProvider.tokenSet.resolveTokenAddress('DAI')
-        );
+        const deploy = await deployer.deploy(client.swapSalt(), ...args, {
+            gasLimit: 1_000_000
+        });
         await deploy.wait();
         console.log('      escrow contract deployed');
 

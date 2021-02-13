@@ -29,9 +29,7 @@
         "doc": "typedoc",
         "test": "mocha test/*.test.ts -f exodus -i",
         "exodus": "mocha test/*.test.ts -f exodus",
-        "fmt:ts": "prettier --config fmt-ts.json --write {src,test}/*.ts",
-        "fmt:sol": "prettier --config fmt-sol.json --write contracts/*.sol",
-        "fmt": "yarn fmt:ts && yarn fmt:sol"
+        "fmt": "prettier --write contracts src test"
     },
     "mocha": {
         "exit": true,

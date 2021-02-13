@@ -2,7 +2,7 @@
 
 pragma solidity ^0.7.0;
 
-import "./Rescuer.sol";
+import './Rescuer.sol';
 
 contract Deployer {
     event Deployed(address);
@@ -13,9 +13,20 @@ contract Deployer {
         address client,
         address provider,
         address clientToken,
-        address providerToken
+        address providerToken,
+        uint64 timestamp,
+        address zksync
     ) external {
-        Rescuer rescuer = new Rescuer{salt: _salt}(client, provider, clientToken, providerToken);
+        Rescuer rescuer =
+            new Rescuer{salt: _salt}(
+                client,
+                provider,
+                clientToken,
+                providerToken,
+                timestamp,
+                zksync
+            );
+
         emit Deployed(address(rescuer));
     }
 }

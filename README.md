@@ -31,7 +31,7 @@ Preparation:
 
 1. Compile config (`zk config compile`)
 2. Modify the config (in `etc/env/dev/contracts.toml`):
-    - set `dummy_verifier` and `easy_exodus` to `true`
+   - set `dummy_verifier` and `easy_exodus` to `true`
 3. Initialize the environment (`zk init`)
 4. Start the server (`zk server`)
 5. Start the prover (`zk dummy-prover run`)
@@ -39,12 +39,13 @@ Preparation:
 `yarn exodus` launches the test. After test is complete, server is no longer usable (since exodus mode is activated) and will have to be reset.
 
 To reset the server:
+
 - Stop it
 - Run `zk contract redeploy`
 - Run `zk server --genesis`
 - Start the server again with `zk server`
+- Restart the dummy-prover
 
 ### Example usage
 
 // TODO
-
