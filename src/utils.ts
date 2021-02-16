@@ -1,7 +1,7 @@
 import { ethers, utils } from 'ethers';
 import * as zksync from 'zksync';
 import { private_key_to_pubkey, privateKeyFromSeed } from 'zksync-crypto';
-import { SwapData } from './types';
+import { SwapData, Transaction } from './types';
 
 export const TOTAL_TRANSACTIONS = 5;
 export const SYNC_PREFIX = 'sync:';
@@ -29,44 +29,12 @@ export async function getSyncKeys(ethWallet: ethers.Wallet) {
     return { privkey, pubkey };
 }
 
-export function getTargetAddress(transaction: any) {
-    switch (transaction.type) {
-        case 'Transfer':
-            return transaction.to;
-        case 'ChangePubKey':
-            return transaction.account;
-        case 'Withdraw':
-            return transaction.ethAddress;
-        default:
-            throw new Error('Invalid transaction type');
-    }
-}
-
-export function getFeeType(transaction: any) {
-    if (transaction.type == 'ChangePubKey') {
-        return {
-            ChangePubKey: { onchainPubkeyAuth: false }
-            // ChangePubKey: transaction.ethAuthData.type
-        };
-    }
-    return transaction.type;
-}
-
-export function formatTx(tx: any, signature: Uint8Array, pubkey: Uint8Array) {
+export function formatTx(tx: Transaction, signature: Uint8Array, pubkey: Uint8Array) {
     tx.signature = {
         pubKey: utils.hexlify(pubkey).substr(2),
         signature: utils.hexlify(signature).substr(2)
     };
     tx.fee = ethers.BigNumber.from(tx.fee).toString();
-    if ('ethAddress' in tx) {
-        tx.to = tx.ethAddress;
-    }
-    if ('feeTokenId' in tx) {
-        tx.feeToken = tx.feeTokenId;
-    }
-    if ('tokenId' in tx) {
-        tx.token = tx.tokenId;
-    }
     if ('amount' in tx) {
         tx.amount = ethers.BigNumber.from(tx.amount).toString();
     }
@@ -79,7 +47,7 @@ export async function getTransactions(
     swapAddress: string,
     pubKeyHash: Uint8Array,
     syncProvider: zksync.Provider
-): Promise<any[]> {
+): Promise<Transaction[]> {
     const swapAccount = await syncProvider.getState(swapAddress);
     if (!swapAccount.id) {
         throw new Error("Swap Account ID not set - can't sign transactions");
@@ -95,7 +63,7 @@ export async function getTransactions(
             account: swapAccount.address,
             newPkHash: utils.hexlify(pubKeyHash).replace('0x', SYNC_PREFIX),
             nonce,
-            feeTokenId: sellTokenId,
+            feeToken: sellTokenId,
             fee: 0,
             validFrom: 0,
             validUntil: zksync.utils.MAX_TIMESTAMP,
@@ -109,13 +77,12 @@ export async function getTransactions(
 
         {
             type: 'Transfer',
-            tokenId: buyTokenId,
+            token: buyTokenId,
             accountId: swapAccount.id,
             from: swapAccount.address,
             to: clientAddress,
             amount: swapData.buy.amount,
             fee: 0,
-            feeTokenId: buyTokenId,
             nonce: nonce + 1,
             validFrom: 0,
             validUntil: swapData.timeout
@@ -123,13 +90,12 @@ export async function getTransactions(
 
         {
             type: 'Transfer',
-            tokenId: sellTokenId,
+            token: sellTokenId,
             accountId: swapAccount.id,
             from: swapAccount.address,
             to: providerAddress,
             amount: swapData.sell.amount,
             fee: 0,
-            feeTokenId: sellTokenId,
             nonce: nonce + 2,
             validFrom: 0,
             validUntil: zksync.utils.MAX_TIMESTAMP
@@ -137,13 +103,12 @@ export async function getTransactions(
 
         {
             type: 'Transfer',
-            tokenId: sellTokenId,
+            token: sellTokenId,
             accountId: swapAccount.id,
             from: swapAccount.address,
             to: clientAddress,
             amount: swapData.sell.amount,
             fee: 0,
-            feeTokenId: sellTokenId,
             nonce: nonce + 1,
             validFrom: swapData.timeout + 1,
             validUntil: zksync.utils.MAX_TIMESTAMP
@@ -151,13 +116,12 @@ export async function getTransactions(
 
         {
             type: 'Transfer',
-            tokenId: buyTokenId,
+            token: buyTokenId,
             accountId: swapAccount.id,
             from: swapAccount.address,
             to: providerAddress,
             amount: swapData.buy.amount,
             fee: 0,
-            feeTokenId: buyTokenId,
             nonce: nonce + 2,
             validFrom: swapData.timeout + 1,
             validUntil: zksync.utils.MAX_TIMESTAMP

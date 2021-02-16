@@ -1,8 +1,8 @@
 import * as zksync from 'zksync';
 import { ethers, utils } from 'ethers';
 import { MusigSigner } from './signer';
-import { SwapData, SwapState } from './types';
-import { getSyncKeys, SYNC_TX_PREFIX, getFeeType, getTargetAddress } from './utils';
+import { SwapData, SwapState, Transaction } from './types';
+import { getSyncKeys, SYNC_TX_PREFIX } from './utils';
 
 export class SwapParty {
     protected signer: MusigSigner;
@@ -68,21 +68,8 @@ export class SwapParty {
         this.state = SwapState.empty;
     }
 
-    protected getSignBytes(transaction: any): Uint8Array {
-        switch (transaction.type) {
-            case 'Transfer':
-                return this.syncWallet.signer.transferSignBytes(transaction);
-            case 'ChangePubKey':
-                return this.syncWallet.signer.changePubKeySignBytes(transaction);
-            case 'Withdraw':
-                return this.syncWallet.signer.withdrawSignBytes(transaction);
-            default:
-                throw new Error('Invalid transaction type');
-        }
-    }
-
     protected async isTxExecuted(transacion: any) {
-        const hash = utils.sha256(this.getSignBytes(transacion)).replace('0x', SYNC_TX_PREFIX);
+        const hash = utils.sha256(zksync.utils.serializeTx(transacion)).replace('0x', SYNC_TX_PREFIX);
         const receipt = await this.syncWallet.provider.getTxReceipt(hash);
         return receipt.executed && receipt.success;
     }
@@ -122,8 +109,8 @@ export class SwapParty {
             return [];
         }
         const fee = await this.syncWallet.provider.getTransactionsBatchFee(
-            batch.map((tx) => getFeeType(tx.tx)).concat(['Transfer']),
-            batch.map((tx) => getTargetAddress(tx.tx)).concat([this.address()]),
+            [...batch.map((tx) => getFeeType(tx.tx)), 'Transfer'],
+            [...batch.map((tx) => getTargetAddress(tx.tx)), this.address()],
             token
         );
         const feePayingTx = await this.syncWallet.signSyncTransfer({
@@ -138,4 +125,20 @@ export class SwapParty {
         await Promise.all(handles.map((handle) => handle.awaitReceipt()));
         return handles.map((handle) => handle.txHash);
     }
+}
+
+function getTargetAddress(transaction: Transaction) {
+    if (transaction.type == 'ChangePubKey') {
+        return transaction.account;
+    }
+    return transaction.to;
+}
+
+function getFeeType(transaction: Transaction) {
+    if (transaction.type == 'ChangePubKey') {
+        return {
+            ChangePubKey: transaction.ethAuthData.type
+        };
+    }
+    return transaction.type;
 }

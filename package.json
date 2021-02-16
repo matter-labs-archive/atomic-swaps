@@ -6,7 +6,7 @@
     "dependencies": {
         "ethers": "^5.0.31",
         "schnorr-musig": "^0.1.0",
-        "zksync": "^0.9.0",
+        "zksync": "link:../../zksync-dev/sdk/zksync.js",
         "zksync-crypto": "^0.4.5"
     },
     "devDependencies": {

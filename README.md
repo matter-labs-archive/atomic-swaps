@@ -46,6 +46,13 @@ To reset the server:
 - Start the server again with `zk server`
 - Restart the dummy-prover
 
+### Troubleshooting
+
+- Check `zk dummy-prover status`, it should be `enabled`. Otherwise, run `zk dummy-prover enable`.
+- Make sure you are using `master` branch, not `dev`.
+- Make sure you are using latest `zksync.js`. Use `yarn upgrade --latest zksync` to upgrade.
+- Make sure you are using latest `zksync` server from our public repo.
+
 ### Example usage
 
 // TODO

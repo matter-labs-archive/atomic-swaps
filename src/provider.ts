@@ -91,7 +91,7 @@ export class SwapProvider extends SwapParty {
         );
         this.shares = [];
         this.transactions.forEach((tx, i) => {
-            const bytes = this.getSignBytes(tx);
+            const bytes = zksync.utils.serializeTx(tx);
             this.shares.push(this.signer.sign(this.privateKey, bytes, i));
         });
         this.state = SwapState.signed;
@@ -113,7 +113,7 @@ export class SwapProvider extends SwapParty {
         const musigPubkey = this.signer.computePubkey();
         this.transactions.forEach((tx, i) => {
             const signature = this.signer.receiveSignatureShares([this.shares[i], signatureShares[i]], i);
-            const bytes = this.getSignBytes(this.transactions[i]);
+            const bytes = zksync.utils.serializeTx(this.transactions[i]);
             // this could mean that either client sent incorrect signature shares
             // or client signed transactions containing wrong data
             if (!this.signer.verify(bytes, signature)) {

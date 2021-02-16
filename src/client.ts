@@ -116,7 +116,7 @@ export class SwapClient extends SwapParty {
 
         // sign all transactions
         this.transactions.forEach((tx, i) => {
-            const bytes = this.getSignBytes(tx);
+            const bytes = zksync.utils.serializeTx(tx);
             const share = this.signer.sign(this.privateKey, bytes, i);
             const signature = this.signer.receiveSignatureShares([data.shares[i], share], i);
             shares.push(share);
@@ -150,7 +150,7 @@ export class SwapClient extends SwapParty {
         if (this.state != SwapState.deposited) {
             throw new Error('No funds on the swap account - nothing to wait for');
         }
-        const hash = utils.sha256(this.getSignBytes(this.transactions[1]));
+        const hash = utils.sha256(zksync.utils.serializeTx(this.transactions[1]));
         const timeout = this.swapData.timeout * 1000 - Date.now();
         const result = await Promise.race([
             this.syncWallet.provider.notifyTransaction(hash.replace('0x', SYNC_TX_PREFIX), action),
