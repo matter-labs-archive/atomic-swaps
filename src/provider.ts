@@ -1,74 +1,67 @@
 /**
- * This file contains an implementation if SwapProvider class - essentially a server-side part of the SDK
+ * This file contains an implementation of SwapProvider class - essentially a server-side part of the SDK
  * @packageDocumentation
  */
 
 import * as zksync from 'zksync';
 import { pubKeyHash } from 'zksync-crypto';
-import { ethers, utils } from 'ethers';
+import { utils, providers } from 'ethers';
 import { MusigSigner } from './signer';
-import { SwapData, SchnorrData } from './types';
-import { transpose, getSyncKeys, getSignBytes, getTransactions, formatTx, TOTAL_TRANSACTIONS } from './utils';
+import { SwapData, SchnorrData, SwapState } from './types';
+import { transpose, getTransactions, formatTx, TOTAL_TRANSACTIONS } from './utils';
 
-enum State {
-    empty,
-    prepared,
-    signed,
-    checked,
-    deposited
-}
+import { SwapParty } from './abstract-party';
 
 // This is the provider's position in schnorr-musig protocol
 const PROVIDER_MUSIG_POSITION = 0;
 
-export class SwapProvider {
-    private signer: MusigSigner;
-    private transactions: any[];
+export class SwapProvider extends SwapParty {
     private shares: Uint8Array[];
-    private swapData: SwapData;
     private schnorrData: SchnorrData = {};
-    private pubKeyHash: Uint8Array;
-    private swapAddress: string;
     private clientAddress: string;
-    private state: State;
-    private constructor(private privateKey: string, private publicKey: string, private syncWallet: zksync.Wallet) {
-        this.state = State.empty;
+
+    /** async factory method */
+    static async init(privateKey: string, ethProvider: providers.Provider, syncProvider: zksync.Provider) {
+        return (await super.init(privateKey, ethProvider, syncProvider)) as SwapProvider;
     }
 
-    /** SwapProvider's async constructor */
-    static async init(privateKey: string, ethProvider: ethers.providers.Provider, syncProvider: zksync.Provider) {
-        const ethWallet = new ethers.Wallet(privateKey).connect(ethProvider);
-        const syncWallet = await zksync.Wallet.fromEthSigner(ethWallet, syncProvider);
-        const { privkey, pubkey } = await getSyncKeys(ethWallet);
-        return new SwapProvider(utils.hexlify(privkey), utils.hexlify(pubkey), syncWallet);
+    async loadSwap(swapData: SwapData, signedTransactions: any[]) {
+        if (this.state != SwapState.empty) {
+            throw new Error("In the middle of a swap - can't switch to a new one");
+        }
+        this.swapData = swapData;
+        this.transactions = signedTransactions;
+        const swapAddress = signedTransactions[0].account;
+        const swapAccount = await this.syncWallet.provider.getState(swapAddress);
+        const balance = swapAccount.committed.balances[swapData.buy.token];
+        this.state = swapData.buy.amount.gt(balance) ? SwapState.checked : SwapState.deposited;
     }
 
-    address() {
-        return this.syncWallet.address();
-    }
-
-    pubkey() {
-        return this.publicKey;
+    signedTransactions() {
+        if (this.state != SwapState.checked && this.state != SwapState.deposited) {
+            throw new Error('Transactions are not signed yet');
+        }
+        return this.transactions;
     }
 
     /**
      * Generates precommitments for the schnorr-musig protocol
      */
     async prepareSwap(data: SwapData, clientPubkey: string, clientAddress: string) {
-        if (this.state != State.empty) {
-            throw new Error("SwapProvider is in the middle of a swap - can't start a new one");
+        if (this.state != SwapState.empty) {
+            throw new Error("In the middle of a swap - can't start a new one");
         }
         this.signer = new MusigSigner([this.publicKey, clientPubkey], PROVIDER_MUSIG_POSITION, TOTAL_TRANSACTIONS);
         this.schnorrData.precommitments = this.signer.computePrecommitments();
         this.swapData = data;
         this.clientAddress = clientAddress;
         this.pubKeyHash = pubKeyHash(this.signer.computePubkey());
-        this.swapAddress = zksync.utils.getCREATE2AddressAndSalt(utils.hexlify(this.pubKeyHash), {
-            creatorAddress: this.clientAddress,
+        this.create2Info = zksync.utils.getCREATE2AddressAndSalt(utils.hexlify(this.pubKeyHash), {
+            creatorAddress: data.create2.creator,
             saltArg: data.create2.salt,
             codeHash: data.create2.hash
-        }).address;
-        this.state = State.prepared;
+        });
+        this.state = SwapState.prepared;
         return {
             publicKey: this.publicKey,
             address: this.address(),
@@ -80,8 +73,8 @@ export class SwapProvider {
      * Generates all 5 transactions needed for the swap and signature shares for them
      */
     async signSwap(data: SchnorrData) {
-        if (this.state != State.prepared) {
-            throw new Error('SwapProvider is not prepared for the swap');
+        if (this.state != SwapState.prepared) {
+            throw new Error('Not prepared for the swap');
         }
         this.schnorrData.commitments = this.signer.receivePrecommitments(
             transpose([this.schnorrData.precommitments, data.precommitments])
@@ -92,16 +85,16 @@ export class SwapProvider {
             this.swapData,
             this.clientAddress,
             this.address(),
-            this.swapAddress,
+            this.swapAddress(),
             this.pubKeyHash,
             this.syncWallet.provider
         );
         this.shares = [];
         this.transactions.forEach((tx, i) => {
-            const bytes = getSignBytes(tx, this.syncWallet.signer);
+            const bytes = this.getSignBytes(tx);
             this.shares.push(this.signer.sign(this.privateKey, bytes, i));
         });
-        this.state = State.signed;
+        this.state = SwapState.signed;
         return {
             commitments: this.schnorrData.commitments,
             shares: this.shares
@@ -114,52 +107,46 @@ export class SwapProvider {
      * Verifies that client has deposited funds to the multisig, otherwise an error is thrown.
      */
     async checkSwap(signatureShares: Uint8Array[]) {
-        if (this.state != State.signed) {
-            throw new Error('SwapProvider has not yet signed the swap transactions');
+        if (this.state != SwapState.signed) {
+            throw new Error('Not yet signed the swap transactions');
         }
         const musigPubkey = this.signer.computePubkey();
         this.transactions.forEach((tx, i) => {
             const signature = this.signer.receiveSignatureShares([this.shares[i], signatureShares[i]], i);
-            const bytes = getSignBytes(this.transactions[i], this.syncWallet.signer);
+            const bytes = this.getSignBytes(this.transactions[i]);
             // this could mean that either client sent incorrect signature shares
             // or client signed transactions containing wrong data
             if (!this.signer.verify(bytes, signature)) {
-                throw new Error('Provided signature shares were invalid');
+                throw new Error('Provided signature shares are invalid');
             }
             formatTx(tx, signature, musigPubkey);
         });
-        const swapAccountBalance = (await this.syncWallet.provider.getState(this.swapAddress)).committed.balances;
-        const necessaryDeposit = this.swapData.sell.amount.add(this.transactions[0].fee).add(this.transactions[2].fee);
-        if (necessaryDeposit.gt(swapAccountBalance[this.swapData.sell.token])) {
-            throw new Error('Client did not deposit funds');
+        const swapAccount = await this.syncWallet.provider.getState(this.swapAddress());
+        const balance = swapAccount.committed.balances[this.swapData.sell.token];
+        if (this.swapData.sell.amount.gt(balance)) {
+            throw new Error('Client did not deposit enough funds');
         }
-        this.state = State.checked;
+        this.state = SwapState.checked;
     }
 
     /** Deposits provider's funds to the multisig account */
-    async depositFunds() {
-        if (this.state != State.checked) {
-            throw new Error("SwapProvider has not yet checked the signatures - can't deposit funds");
+    async depositFunds(depositType: 'L1' | 'L2' = 'L2', autoApprove: boolean = true) {
+        if (this.state != SwapState.checked) {
+            throw new Error('Not yet checked the signatures - not safe to deposit funds');
         }
-        const handle = await this.syncWallet.syncTransfer({
-            to: this.swapAddress,
-            amount: this.swapData.buy.amount.add(this.transactions[1].fee),
-            token: this.swapData.buy.token
-        });
-        await handle.awaitReceipt();
-        this.state = State.deposited;
-        return handle.txHash;
+        const hash = await this.deposit(this.swapData.buy.token, this.swapData.buy.amount, depositType, autoApprove);
+        this.state = SwapState.deposited;
+        return hash;
     }
 
-    /** Sends 3 transactions that will finalize the swap */
+    /** Sends transactions that will finalize the swap */
     async finalizeSwap() {
-        if (this.state != State.deposited) {
-            throw new Error("SwapProvider has not yet deposited funds - can't finalize swap");
+        if (this.state != SwapState.deposited) {
+            throw new Error('No funds on the swap account - nothing to finalize');
         }
-        for (const tx of this.transactions.slice(0, 3)) {
-            const handle = await zksync.wallet.submitSignedTransaction({ tx }, this.syncWallet.provider);
-            await handle.awaitReceipt();
-        }
-        this.state = State.empty;
+        await this.sendBatch([this.transactions[0]], this.swapData.buy.token);
+        const hashes = await this.sendBatch(this.transactions.slice(1, 3), this.swapData.buy.token);
+        this.state = SwapState.finalized;
+        return hashes;
     }
 }

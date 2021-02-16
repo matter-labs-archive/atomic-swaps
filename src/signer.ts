@@ -1,6 +1,6 @@
-import { MusigBN256WasmSigner, MusigBN256WasmAggregatedPubkey, MusigBN256WasmVerifier } from 'musig-bindings';
+import { MusigBN256WasmSigner, MusigBN256WasmAggregatedPubkey, MusigBN256WasmVerifier } from 'schnorr-musig';
 import { utils, BytesLike } from 'ethers';
-import { rescueHashTx } from 'zksync-crypto';
+import { rescueHash } from 'zksync-crypto';
 import * as crypto from 'crypto';
 
 export class MusigSigner {
@@ -18,7 +18,7 @@ export class MusigSigner {
     }
 
     verify(message: BytesLike, signature: BytesLike): boolean {
-        const hash = rescueHashTx(utils.arrayify(message));
+        const hash = rescueHash(utils.arrayify(message));
         return MusigBN256WasmVerifier.verify(hash, utils.concat(this.pubkeys), utils.arrayify(signature));
     }
 
@@ -46,7 +46,7 @@ export class MusigSigner {
     }
 
     sign(privkey: BytesLike, message: BytesLike, index: number): Uint8Array {
-        const hash = rescueHashTx(utils.arrayify(message));
+        const hash = rescueHash(utils.arrayify(message));
         return this.signers[index].sign(utils.arrayify(privkey), hash);
     }
 
