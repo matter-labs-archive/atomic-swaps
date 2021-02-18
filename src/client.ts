@@ -7,7 +7,7 @@ import * as zksync from 'zksync';
 import { pubKeyHash } from 'zksync-crypto';
 import { providers, utils } from 'ethers';
 import { MusigSigner } from './signer';
-import { SwapData, SwapState } from './types';
+import { SwapData, SwapState, Transaction } from './types';
 import { transpose, getTransactions, formatTx, SYNC_TX_PREFIX, TOTAL_TRANSACTIONS } from './utils';
 
 import { SwapParty } from './abstract-party';
@@ -24,12 +24,13 @@ export class SwapClient extends SwapParty {
         return (await super.init(privateKey, ethProvider, syncProvider)) as SwapClient;
     }
 
-    async loadSwap(swapData: SwapData, signedTransactions: any[]) {
+    async loadSwap(swapData: SwapData, signedTransactions: Transaction[]) {
         if (this.state != SwapState.empty) {
             throw new Error("In the middle of a swap - can't switch to a new one");
         }
         this.swapData = swapData;
         this.transactions = signedTransactions;
+        // @ts-ignore
         const swapAddress = signedTransactions[0].account;
         const swapAccount = await this.syncWallet.provider.getState(swapAddress);
         const balance = swapAccount.committed.balances[swapData.sell.token];
@@ -146,12 +147,12 @@ export class SwapClient extends SwapParty {
      * Waits until the transaction that finalizes the swap is sent onchain.
      * @returns true if the transaction is sent before the timeout, false otherwise
      */
-    async wait(action: 'COMMIT' | 'VERIFY' = 'COMMIT') {
+    async wait(action: 'COMMIT' | 'VERIFY' = 'COMMIT', timeout?: number) {
         if (this.state != SwapState.deposited) {
             throw new Error('No funds on the swap account - nothing to wait for');
         }
         const hash = utils.sha256(zksync.utils.serializeTx(this.transactions[1]));
-        const timeout = this.swapData.timeout * 1000 - Date.now();
+        timeout = timeout || this.swapData.timeout * 1000 - Date.now();
         const result = await Promise.race([
             this.syncWallet.provider.notifyTransaction(hash.replace('0x', SYNC_TX_PREFIX), action),
             new Promise((resolve) => setTimeout(resolve, timeout, null))
@@ -169,8 +170,7 @@ export class SwapClient extends SwapParty {
         if (this.state != SwapState.deposited || this.swapData.buy.amount.gt(balance)) {
             throw new Error('No funds on the swap account - nothing to finalize');
         }
-        await this.sendBatch([this.transactions[0]], this.swapData.sell.token);
-        const hashes = await this.sendBatch([this.transactions[1]], this.swapData.sell.token);
+        const hashes = await this.sendBatch(this.transactions.slice(0, 2), this.swapData.sell.token);
         this.state = SwapState.finalized;
         return hashes;
     }
@@ -183,8 +183,7 @@ export class SwapClient extends SwapParty {
         if (this.state != SwapState.deposited) {
             throw new Error('No funds on the swap account - nothing to cancel');
         }
-        await this.sendBatch([this.transactions[0]], this.swapData.sell.token);
-        const hashes = await this.sendBatch([this.transactions[3]], this.swapData.sell.token);
+        const hashes = await this.sendBatch([this.transactions[0], this.transactions[3]], this.swapData.sell.token);
         this.state = SwapState.finalized;
         return hashes;
     }

@@ -74,7 +74,7 @@ describe('Tests', () => {
     }
 
     async function exchangeSwapInfo(client: SwapClient, provider: SwapProvider, verify: boolean = false) {
-        const response = await provider.prepareSwap(swapData, client.pubkey(), client.address());
+        const response = await provider.prepareSwap(swapData, client.publicKey, client.address());
         console.log('    provider prepared for the swap');
         const data = await client.prepareSwap(swapData, response.publicKey, response.address, response.precommitments);
         console.log('    client prepared for the swap');
@@ -141,7 +141,6 @@ describe('Tests', () => {
             client.wait(),
             (async () => {
                 await new Promise((r) => setTimeout(r, 3000));
-                await provider.depositFunds();
                 await provider.finalizeSwap();
             })()
         ]);
@@ -156,7 +155,7 @@ describe('Tests', () => {
         const clientBalance = await getBalance(client.address(), 'DAI');
 
         await exchangeSwapInfo(client, provider);
-        await provider.depositFunds();
+        await provider.deposit(swapData.buy.token, swapData.buy.amount);
         await client.finalizeSwap();
 
         const newClientBalance = await getBalance(client.address(), 'DAI');
@@ -190,11 +189,8 @@ describe('Tests', () => {
             verifyTxHash = event.transactionHash;
         });
 
-        await exchangeSwapInfo(client, provider, true);
-        const hash = await provider.depositFunds();
-
         // wait until the deposits are verified
-        await syncProvider.notifyTransaction(hash, 'VERIFY');
+        await exchangeSwapInfo(client, provider, true);
         console.log('      transactions verified');
 
         // enter exodus mode

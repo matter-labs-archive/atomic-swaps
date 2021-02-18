@@ -1,12 +1,12 @@
 import * as zksync from 'zksync';
-import { ethers, utils } from 'ethers';
+import { ethers, utils, BigNumber } from 'ethers';
 import { MusigSigner } from './signer';
-import { SwapData, SwapState, Transaction } from './types';
+import { SwapData, SwapState, SignedTransaction, Transaction } from './types';
 import { getSyncKeys, SYNC_TX_PREFIX } from './utils';
 
 export class SwapParty {
     protected signer: MusigSigner;
-    protected transactions: any[];
+    protected transactions: Transaction[];
     protected swapData: SwapData;
     protected pubKeyHash: Uint8Array;
     protected state: SwapState;
@@ -17,8 +17,8 @@ export class SwapParty {
 
     protected constructor(
         protected privateKey: string,
-        protected publicKey: string,
-        protected syncWallet: zksync.Wallet
+        public readonly publicKey: string,
+        public readonly syncWallet: zksync.Wallet
     ) {
         this.state = SwapState.empty;
     }
@@ -36,10 +36,6 @@ export class SwapParty {
 
     address() {
         return this.syncWallet.address();
-    }
-
-    pubkey() {
-        return this.publicKey;
     }
 
     /** @returns zkSync account ID */
@@ -68,15 +64,15 @@ export class SwapParty {
         this.state = SwapState.empty;
     }
 
-    protected async isTxExecuted(transacion: any) {
+    protected async isTxExecuted(transacion: Transaction) {
         const hash = utils.sha256(zksync.utils.serializeTx(transacion)).replace('0x', SYNC_TX_PREFIX);
         const receipt = await this.syncWallet.provider.getTxReceipt(hash);
         return receipt.executed && receipt.success;
     }
 
-    protected async deposit(
+    async deposit(
         token: zksync.types.TokenLike,
-        amount: ethers.BigNumber,
+        amount: BigNumber,
         depositType: 'L1' | 'L2' = 'L2',
         autoApprove: boolean = true
     ) {
@@ -98,8 +94,12 @@ export class SwapParty {
         return hash;
     }
 
-    protected async sendBatch(txs: any[], token: zksync.types.TokenLike) {
-        let batch = [];
+    protected async sendBatch(
+        txs: Transaction[],
+        token: zksync.types.TokenLike,
+        depositAmount: ethers.BigNumberish = 0
+    ) {
+        let batch: SignedTransaction[] = [];
         for (const tx of txs) {
             if (!(await this.isTxExecuted(tx))) {
                 batch.push({ tx });
@@ -110,17 +110,21 @@ export class SwapParty {
         }
         const fee = await this.syncWallet.provider.getTransactionsBatchFee(
             [...batch.map((tx) => getFeeType(tx.tx)), 'Transfer'],
-            [...batch.map((tx) => getTargetAddress(tx.tx)), this.address()],
+            [...batch.map((tx) => getTargetAddress(tx.tx)), this.swapAddress()],
             token
         );
-        const feePayingTx = await this.syncWallet.signSyncTransfer({
-            to: this.address(),
+        const feePayingTx = (await this.syncWallet.signSyncTransfer({
+            to: this.swapAddress(),
             token,
-            amount: 0,
+            amount: depositAmount,
             fee,
             nonce: await this.syncWallet.getNonce()
-        });
-        batch.push(feePayingTx);
+        })) as SignedTransaction;
+        if (batch[0].tx.type == 'ChangePubKey') {
+            batch.splice(1, 0, feePayingTx);
+        } else {
+            batch.unshift(feePayingTx);
+        }
         const handles = await zksync.wallet.submitSignedTransactionsBatch(this.syncWallet.provider, batch, []);
         await Promise.all(handles.map((handle) => handle.awaitReceipt()));
         return handles.map((handle) => handle.txHash);
