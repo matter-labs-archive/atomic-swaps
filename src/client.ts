@@ -31,9 +31,9 @@ export class SwapClient extends SwapParty {
         this.swapData = swapData;
         this.transactions = signedTransactions;
         // @ts-ignore
-        const swapAddress = signedTransactions[0].account;
+        const swapAddress = (this.create2Info.address = signedTransactions[0].account);
         const swapAccount = await this.syncWallet.provider.getState(swapAddress);
-        const balance = swapAccount.committed.balances[swapData.sell.token];
+        const balance = swapAccount.committed.balances[swapData.sell.token] || 0;
         this.state = swapData.sell.amount.gt(balance) ? SwapState.signed : SwapState.deposited;
     }
 
@@ -166,7 +166,7 @@ export class SwapClient extends SwapParty {
     /** Sends transactions that will finalize the swap */
     async finalizeSwap() {
         const swapAccount = await this.syncWallet.provider.getState(this.swapAddress());
-        const balance = swapAccount.committed.balances[this.swapData.buy.token];
+        const balance = swapAccount.committed.balances[this.swapData.buy.token] || 0;
         if (this.state != SwapState.deposited || this.swapData.buy.amount.gt(balance)) {
             throw new Error('No funds on the swap account - nothing to finalize');
         }

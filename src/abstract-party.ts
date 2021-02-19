@@ -9,19 +9,17 @@ export class SwapParty {
     protected transactions: Transaction[];
     protected swapData: SwapData;
     protected pubKeyHash: Uint8Array;
-    protected state: SwapState;
+    protected state: SwapState = SwapState.empty;
     protected create2Info: {
-        salt: string;
-        address: string;
-    };
+        salt?: string;
+        address?: string;
+    } = {};
 
     protected constructor(
         protected privateKey: string,
         public readonly publicKey: string,
         public readonly syncWallet: zksync.Wallet
-    ) {
-        this.state = SwapState.empty;
-    }
+    ) {}
 
     protected static async init(
         privateKey: string,

@@ -26,6 +26,8 @@ Array.prototype.last = function () {
 describe('Tests', () => {
     let client: SwapClient;
     let provider: SwapProvider;
+    let backupClient: SwapClient;
+    let backupProvider: SwapProvider;
     let rich: ethers.Wallet;
     let ethProvider: ethers.providers.Provider;
     let syncProvider: zksync.Provider;
@@ -103,6 +105,8 @@ describe('Tests', () => {
         const providerKey = await createWallet(richWallet, 'DAI', utils.parseUnits('50000.0', 18));
         client = await SwapClient.init(clientKey, ethProvider, syncProvider);
         provider = await SwapProvider.init(providerKey, ethProvider, syncProvider);
+        backupClient = await SwapClient.init(clientKey, ethProvider, syncProvider);
+        backupProvider = await SwapProvider.init(providerKey, ethProvider, syncProvider);
 
         // extract CREATE2 data
         const rescuerBytecode = '0x' + fs.readFileSync(RESCUER_CONTRACT).toString();
@@ -175,6 +179,23 @@ describe('Tests', () => {
         expect(difference.lt(utils.parseEther('0.1'))).to.be.true;
 
         swapData.timeout = Math.floor(Date.now() / 1000) + 600;
+    });
+
+    it('should save and load signed transactions', async () => {
+        const providerBalance = await getBalance(provider.address(), 'ETH');
+        const clientBalance = await getBalance(client.address(), 'DAI');
+
+        await exchangeSwapInfo(client, provider);
+
+        await backupClient.loadSwap(swapData, client.signedTransactions());
+        await backupProvider.loadSwap(swapData, provider.signedTransactions());
+
+        await backupProvider.finalizeSwap();
+
+        const newProviderBalance = await getBalance(provider.address(), 'ETH');
+        const newClientBalance = await getBalance(client.address(), 'DAI');
+        expect(newProviderBalance.sub(providerBalance).eq(utils.parseEther('1.0'))).to.be.true;
+        expect(newClientBalance.sub(clientBalance).eq(utils.parseUnits('1000.0', 18))).to.be.true;
     });
 
     it('should rescue funds in case of exodus mode', async () => {

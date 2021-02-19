@@ -32,9 +32,9 @@ export class SwapProvider extends SwapParty {
         this.swapData = swapData;
         this.transactions = signedTransactions;
         // @ts-ignore
-        const swapAddress = signedTransactions[0].account;
+        const swapAddress = (this.create2Info.address = signedTransactions[0].account);
         const swapAccount = await this.syncWallet.provider.getState(swapAddress);
-        const balance = swapAccount.committed.balances[swapData.buy.token];
+        const balance = swapAccount.committed.balances[swapData.buy.token] || 0;
         this.state = swapData.buy.amount.gt(balance) ? SwapState.checked : SwapState.deposited;
     }
 
@@ -123,7 +123,7 @@ export class SwapProvider extends SwapParty {
             formatTx(tx, signature, musigPubkey);
         });
         const swapAccount = await this.syncWallet.provider.getState(this.swapAddress());
-        const balance = swapAccount.committed.balances[this.swapData.sell.token];
+        const balance = swapAccount.committed.balances[this.swapData.sell.token] || 0;
         if (this.swapData.sell.amount.gt(balance)) {
             throw new Error('Client did not deposit enough funds');
         }
